@@ -15,19 +15,19 @@ function getBreadthInsight(snapshot: any) {
   const ratio = declining > 0 ? advancing / declining : advancing > 0 ? 2 : 1
 
   let label = 'Neutral'
-  let emoji = '\u{1F7E1}'
+  let emoji = 'ðŸŸ¡'
   if (score >= 65) {
     label = 'Strong'
-    emoji = '\u{1F7E2}'
+    emoji = 'ðŸŸ¢'
   } else if (score < 45) {
     label = 'Weak'
-    emoji = '\u{1F7E2}'
+    emoji = 'ðŸ”´'
   }
 
   let note = `${Number(snapshot.above_ma20_pct).toFixed(0)}% saham masih berada di atas MA20.`
   if (ratio < 0.5 && score >= 45) {
     label += ' / Weakening'
-    note += " Namun saham turun (" + declining + ") jauh lebih banyak dibanding naik (" + advancing + ") hari ini - tekanan jual jangka pendek meningkat."
+    note += ` Namun saham turun (${declining}) jauh lebih banyak dibanding naik (${advancing}) hari ini â€” tekanan jual jangka pendek meningkat.`
   } else if (ratio > 1.5) {
     note += ` Saham naik (${advancing}) juga lebih banyak dibanding turun (${declining}), mendukung struktur breadth yang sehat.`
   } else {
@@ -38,27 +38,27 @@ function getBreadthInsight(snapshot: any) {
 }
 
 const radarMeta = [
-  { key: 'breakoutWatch', label: 'Breakout Watch', icon: '\u{1F680}', desc: (n: number) => `${n} saham mendekati/breakout resistance` },
-  { key: 'momentum', label: 'Momentum', icon: '\u{1F525}', desc: (n: number) => `${n} saham menunjukkan momentum positif` },
-  { key: 'nearSupport', label: 'Near Support', icon: '\u{1F3AF}', desc: (n: number) => `${n} saham berada dekat area support` },
-  { key: 'unusualVolume', label: 'Unusual Volume', icon: '\u{1F4CA}', desc: (n: number) => `${n} saham dengan volume tidak biasa` },
-  { key: 'distribution', label: 'Distribution', icon: '\u{26A0}\u{FE0F}', desc: (n: number) => `${n} saham menunjukkan tekanan jual` },
+  { key: 'breakoutWatch', label: 'Breakout Watch', icon: 'ðŸš€', desc: (n: number) => `${n} saham mendekati/breakout resistance` },
+  { key: 'momentum', label: 'Momentum', icon: 'ðŸ”¥', desc: (n: number) => `${n} saham menunjukkan momentum positif` },
+  { key: 'nearSupport', label: 'Near Support', icon: 'ðŸŽ¯', desc: (n: number) => `${n} saham berada dekat area support` },
+  { key: 'unusualVolume', label: 'Unusual Volume', icon: 'ðŸ“Š', desc: (n: number) => `${n} saham dengan volume tidak biasa` },
+  { key: 'distribution', label: 'Distribution', icon: 'âš ï¸', desc: (n: number) => `${n} saham menunjukkan tekanan jual` },
 ]
 
 const biasColor: Record<string, string> = {
-  'STRONG BULLISH': String.fromCodePoint(0x1F7E2),
-  BULLISH: String.fromCodePoint(0x1F7E2),
-  NEUTRAL: String.fromCodePoint(0x1F7E1),
-  BEARISH: String.fromCodePoint(0x1F534),
-  'STRONG BEARISH': String.fromCodePoint(0x1F534),
+  'STRONG BULLISH': 'text-emerald-600',
+  BULLISH: 'text-emerald-600',
+  NEUTRAL: 'text-amber-600',
+  BEARISH: 'text-red-600',
+  'STRONG BEARISH': 'text-red-600',
 }
 
 const biasEmoji: Record<string, string> = {
-  'STRONG BULLISH': String.fromCodePoint(0x1F7E2),
-  BULLISH: String.fromCodePoint(0x1F7E2),
-  NEUTRAL: String.fromCodePoint(0x1F7E1),
-  BEARISH: String.fromCodePoint(0x1F534),
-  'STRONG BEARISH': String.fromCodePoint(0x1F534),
+  'STRONG BULLISH': 'ðŸŸ¢',
+  BULLISH: 'ðŸŸ¢',
+  NEUTRAL: 'ðŸŸ¡',
+  BEARISH: 'ðŸ”´',
+  'STRONG BEARISH': 'ðŸ”´',
 }
 
 export default async function DashboardPage() {
@@ -97,7 +97,7 @@ export default async function DashboardPage() {
       </div>
 
       <div className="rounded-xl border border-neutral-200 p-5">
-        <p className="text-xs font-semibold uppercase text-neutral-500">Market Bias - IHSG</p>
+        <p className="text-xs font-semibold uppercase text-neutral-500">Market Bias — IHSG</p>
         <div className="mt-2 flex items-baseline justify-between">
           <p className={`text-xl font-bold ${biasColor[snapshot.market_bias_label]}`}>
             {biasEmoji[snapshot.market_bias_label]} {snapshot.market_bias_label}
@@ -150,7 +150,7 @@ export default async function DashboardPage() {
 
       <div className="rounded-xl border border-neutral-200 p-5">
         <div className="flex items-baseline justify-between">
-          <p className="text-xs font-semibold uppercase text-neutral-500">Market Breadth - IDX Stocks</p>
+          <p className="text-xs font-semibold uppercase text-neutral-500">Market Breadth — IDX Stocks</p>
           <p className="text-sm font-semibold text-neutral-900">{Number(snapshot.breadth_score)}/100</p>
         </div>
         <p className="mt-1 text-sm font-semibold text-neutral-900">
@@ -185,7 +185,7 @@ export default async function DashboardPage() {
       </div>
 
       <div className="rounded-xl border border-neutral-200 p-5">
-        <p className="text-xs font-semibold uppercase text-neutral-500">Top Opportunities</p>
+        <p className="text-xs font-semibold uppercase text-neutral-500">ðŸ”¥ Top Opportunities</p>
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
           {topOpportunities?.map((s) => (
             <Link key={s.ticker} href={`/stock/${s.ticker}`} className="block rounded-lg border border-neutral-200 p-3 transition hover:bg-neutral-50 focus:outline-none focus:ring-2 focus:ring-emerald-500">

@@ -51,12 +51,18 @@ function sleep(ms: number) {
 // REFRESH PRICE DATA
 // ============================================================
 
+type IhsgQuote = {
+  price: number
+  changePercent: number | null
+}
+
 type RefreshResult = {
   success: boolean
   fetchedAt: string
   totalTickers: number
   successfulBatches: number
   failedBatches: number
+  ihsgQuote: IhsgQuote | null
 }
 
 async function refreshPrices(): Promise<RefreshResult> {
@@ -130,6 +136,52 @@ async function refreshPrices(): Promise<RefreshResult> {
     }
   }
 
+  // ----------------------------------------------------------
+  // IHSG LIVE QUOTE
+  //
+  // IHSG dikecualikan dari batch di atas karena kode Yahoo-nya
+  // beda (^JKSE, bukan .JK). Kita ambil terpisah di sini supaya
+  // harga IHSG di Dashboard ikut ter-update tiap 15 menit,
+  // bukan cuma 1x sehari lewat daily backfill.
+  // ----------------------------------------------------------
+
+  let ihsgQuote: IhsgQuote | null = null
+
+  try {
+    const quote = await yahooFinance.quote('^JKSE')
+
+    if (quote.regularMarketPrice != null) {
+      ihsgQuote = {
+        price: Number(quote.regularMarketPrice),
+        changePercent:
+          quote.regularMarketChangePercent != null
+            ? Number(quote.regularMarketChangePercent)
+            : null,
+      }
+
+      const { error: ihsgInsertError } = await supabaseAdmin
+        .from('stock_prices')
+        .insert({
+          ticker: 'IHSG',
+          price: ihsgQuote.price,
+          volume:
+            quote.regularMarketVolume != null
+              ? Number(quote.regularMarketVolume)
+              : null,
+        })
+
+      if (ihsgInsertError) {
+        console.error('Gagal simpan quote IHSG:', ihsgInsertError.message)
+      } else {
+        console.log(
+          `IHSG live: ${ihsgQuote.price} (${ihsgQuote.changePercent?.toFixed(2)}%)`
+        )
+      }
+    }
+  } catch (err) {
+    console.error('Gagal ambil quote IHSG live:', err)
+  }
+
   const success = failedBatches === 0
 
   console.log(
@@ -142,6 +194,7 @@ async function refreshPrices(): Promise<RefreshResult> {
     totalTickers: tickers.length,
     successfulBatches,
     failedBatches,
+    ihsgQuote,
   }
 }
 
@@ -211,6 +264,13 @@ async function computeSnapshot(
   }
 
   const ihsgAnalysis = analyzeStock(ihsgCandles)
+
+  // Harga & change % yang ditampilkan pakai quote live (kalau ada),
+  // supaya tidak "macet" di harga penutupan kemarin selama jam bursa.
+  // Skor teknikal (trend/momentum/volume/risk) tetap dari histori harian.
+  const displayPrice = refresh.ihsgQuote?.price ?? ihsgAnalysis.lastPrice
+  const displayChangePercent =
+    refresh.ihsgQuote?.changePercent ?? ihsgAnalysis.changePercent
 
   // ----------------------------------------------------------
   // ACTIVE UNIVERSE
@@ -534,8 +594,8 @@ async function computeSnapshot(
       successful_batches: refresh.successfulBatches,
       failed_batches: refresh.failedBatches,
 
-      ihsg_price: ihsgAnalysis.lastPrice,
-      ihsg_change_percent: ihsgAnalysis.changePercent,
+      ihsg_price: displayPrice,
+      ihsg_change_percent: displayChangePercent,
 
       market_bias_score: marketBiasScore,
       market_bias_label: marketBiasLabel,
@@ -576,7 +636,7 @@ async function computeSnapshot(
   )
 
   console.log(
-    `IHSG: ${ihsgAnalysis.lastPrice} (${ihsgAnalysis.changePercent?.toFixed(2)}%)`
+    `IHSG: ${displayPrice} (${displayChangePercent?.toFixed(2)}%)`
   )
 
   console.log(

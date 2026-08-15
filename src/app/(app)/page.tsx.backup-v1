@@ -1,6 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
-import Link from 'next/link'
-import DashboardRefresh from './dashboard-refresh'
+import Anthropic from '@anthropic-ai/sdk'
 
 function qualLabel(score: number, positive: string, neutral: string, negative: string) {
   if (score >= 65) return positive
@@ -15,19 +14,19 @@ function getBreadthInsight(snapshot: any) {
   const ratio = declining > 0 ? advancing / declining : advancing > 0 ? 2 : 1
 
   let label = 'Neutral'
-  let emoji = '\u{1F7E1}'
+  let emoji = '🟡'
   if (score >= 65) {
     label = 'Strong'
-    emoji = '\u{1F7E2}'
+    emoji = '🟢'
   } else if (score < 45) {
     label = 'Weak'
-    emoji = '\u{1F7E2}'
+    emoji = '🔴'
   }
 
   let note = `${Number(snapshot.above_ma20_pct).toFixed(0)}% saham masih berada di atas MA20.`
   if (ratio < 0.5 && score >= 45) {
     label += ' / Weakening'
-    note += " Namun saham turun (" + declining + ") jauh lebih banyak dibanding naik (" + advancing + ") hari ini - tekanan jual jangka pendek meningkat."
+    note += ` Namun saham turun (${declining}) jauh lebih banyak dibanding naik (${advancing}) hari ini — tekanan jual jangka pendek meningkat.`
   } else if (ratio > 1.5) {
     note += ` Saham naik (${advancing}) juga lebih banyak dibanding turun (${declining}), mendukung struktur breadth yang sehat.`
   } else {
@@ -38,27 +37,53 @@ function getBreadthInsight(snapshot: any) {
 }
 
 const radarMeta = [
-  { key: 'breakoutWatch', label: 'Breakout Watch', icon: '\u{1F680}', desc: (n: number) => `${n} saham mendekati/breakout resistance` },
-  { key: 'momentum', label: 'Momentum', icon: '\u{1F525}', desc: (n: number) => `${n} saham menunjukkan momentum positif` },
-  { key: 'nearSupport', label: 'Near Support', icon: '\u{1F3AF}', desc: (n: number) => `${n} saham berada dekat area support` },
-  { key: 'unusualVolume', label: 'Unusual Volume', icon: '\u{1F4CA}', desc: (n: number) => `${n} saham dengan volume tidak biasa` },
-  { key: 'distribution', label: 'Distribution', icon: '\u{26A0}\u{FE0F}', desc: (n: number) => `${n} saham menunjukkan tekanan jual` },
+  { key: 'breakoutWatch', label: 'Breakout Watch', icon: '🚀', desc: (n: number) => `${n} saham mendekati/breakout resistance` },
+  { key: 'momentum', label: 'Momentum', icon: '🔥', desc: (n: number) => `${n} saham menunjukkan momentum positif` },
+  { key: 'nearSupport', label: 'Near Support', icon: '🎯', desc: (n: number) => `${n} saham berada dekat area support` },
+  { key: 'unusualVolume', label: 'Unusual Volume', icon: '📊', desc: (n: number) => `${n} saham dengan volume tidak biasa` },
+  { key: 'distribution', label: 'Distribution', icon: '⚠️', desc: (n: number) => `${n} saham menunjukkan tekanan jual` },
 ]
 
 const biasColor: Record<string, string> = {
-  'STRONG BULLISH': String.fromCodePoint(0x1F7E2),
-  BULLISH: String.fromCodePoint(0x1F7E2),
-  NEUTRAL: String.fromCodePoint(0x1F7E1),
-  BEARISH: String.fromCodePoint(0x1F534),
-  'STRONG BEARISH': String.fromCodePoint(0x1F534),
+  'STRONG BULLISH': 'text-emerald-600',
+  BULLISH: 'text-emerald-600',
+  NEUTRAL: 'text-amber-600',
+  BEARISH: 'text-red-600',
+  'STRONG BEARISH': 'text-red-600',
 }
 
 const biasEmoji: Record<string, string> = {
-  'STRONG BULLISH': String.fromCodePoint(0x1F7E2),
-  BULLISH: String.fromCodePoint(0x1F7E2),
-  NEUTRAL: String.fromCodePoint(0x1F7E1),
-  BEARISH: String.fromCodePoint(0x1F534),
-  'STRONG BEARISH': String.fromCodePoint(0x1F534),
+  'STRONG BULLISH': '🟢',
+  BULLISH: '🟢',
+  NEUTRAL: '🟡',
+  BEARISH: '🔴',
+  'STRONG BEARISH': '🔴',
+}
+
+async function generateBrief(snapshot: any): Promise<string> {
+  const fallback = `Market saat ini cenderung ${snapshot.market_bias_label.toLowerCase()} (skor ${snapshot.market_bias_score}/100). ${Number(snapshot.above_ma20_pct).toFixed(0)}% saham berada di atas MA20, dengan ${snapshot.advancing} saham naik vs ${snapshot.declining} saham turun. Fokus pada saham dengan setup jelas dan hindari mengejar saham yang sudah terlalu extended.`
+
+  if (!process.env.ANTHROPIC_API_KEY) return fallback
+
+  try {
+    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-5',
+      max_tokens: 200,
+      system:
+        'Kamu adalah AI Market Brief di StockFamily. Tugasmu HANYA menjelaskan data yang diberikan dalam 3-4 kalimat singkat berbahasa Indonesia, bukan menentukan sendiri arah market. Jangan mengarang angka di luar data yang diberikan.',
+      messages: [
+        {
+          role: 'user',
+          content: `Data market hari ini: Bias ${snapshot.market_bias_label} (skor ${snapshot.market_bias_score}/100), IHSG ${snapshot.ihsg_price} (${snapshot.ihsg_change_percent >= 0 ? '+' : ''}${Number(snapshot.ihsg_change_percent).toFixed(2)}%), ${Number(snapshot.above_ma20_pct).toFixed(0)}% saham di atas MA20, ${snapshot.advancing} saham naik vs ${snapshot.declining} saham turun vs ${snapshot.unchanged ?? 0} tetap. Radar: ${snapshot.radar.breakoutWatch} breakout watch, ${snapshot.radar.momentum} momentum, ${snapshot.radar.distribution} distribution. Jelaskan kondisi ini secara singkat.`,
+        },
+      ],
+    })
+    const textBlock = response.content.find((b) => b.type === 'text')
+    return textBlock && 'text' in textBlock ? textBlock.text : fallback
+  } catch {
+    return fallback
+  }
 }
 
 export default async function DashboardPage() {
@@ -82,7 +107,7 @@ export default async function DashboardPage() {
     )
   }
 
-  const brief = snapshot.ai_brief ?? null
+  const brief = await generateBrief(snapshot)
   const radar = snapshot.radar as Record<string, number>
   const topOpportunities = snapshot.top_opportunities as { ticker: string; name: string; aiScore: number; setup: string }[]
   const breadthInsight = getBreadthInsight(snapshot)
@@ -97,7 +122,7 @@ export default async function DashboardPage() {
       </div>
 
       <div className="rounded-xl border border-neutral-200 p-5">
-        <p className="text-xs font-semibold uppercase text-neutral-500">Market Bias - IHSG</p>
+        <p className="text-xs font-semibold uppercase text-neutral-500">Market Bias</p>
         <div className="mt-2 flex items-baseline justify-between">
           <p className={`text-xl font-bold ${biasColor[snapshot.market_bias_label]}`}>
             {biasEmoji[snapshot.market_bias_label]} {snapshot.market_bias_label}
@@ -138,19 +163,16 @@ export default async function DashboardPage() {
       </div>
 
       <div className="rounded-xl border border-neutral-200 p-5">
-        <p className="text-xs font-semibold uppercase text-neutral-500">IHSG Market Score</p>
+        <p className="text-xs font-semibold uppercase text-neutral-500">Market Bias Score</p>
         <p className={`mt-1 text-3xl font-bold ${biasColor[snapshot.market_bias_label]}`}>
           {snapshot.market_bias_score}/100
         </p>
         <p className="text-sm text-neutral-500">{snapshot.market_bias_label}</p>
-<p className="mt-2 text-xs text-neutral-400">
-  Composite score berdasarkan Trend, Momentum, Breadth, Volume, dan Risk.
-</p>
       </div>
 
       <div className="rounded-xl border border-neutral-200 p-5">
         <div className="flex items-baseline justify-between">
-          <p className="text-xs font-semibold uppercase text-neutral-500">Market Breadth - IDX Stocks</p>
+          <p className="text-xs font-semibold uppercase text-neutral-500">Market Breadth</p>
           <p className="text-sm font-semibold text-neutral-900">{Number(snapshot.breadth_score)}/100</p>
         </div>
         <p className="mt-1 text-sm font-semibold text-neutral-900">
@@ -185,15 +207,15 @@ export default async function DashboardPage() {
       </div>
 
       <div className="rounded-xl border border-neutral-200 p-5">
-        <p className="text-xs font-semibold uppercase text-neutral-500">Top Opportunities</p>
+        <p className="text-xs font-semibold uppercase text-neutral-500">🔥 Top Opportunities</p>
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
           {topOpportunities?.map((s) => (
-            <Link key={s.ticker} href={`/stock/${s.ticker}`} className="block rounded-lg border border-neutral-200 p-3 transition hover:bg-neutral-50 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+            <div key={s.ticker} className="rounded-lg border border-neutral-200 p-3">
               <p className="font-semibold text-neutral-900">{s.ticker}</p>
               <p className="truncate text-xs text-neutral-500">{s.name}</p>
               <p className="mt-1 text-xs text-neutral-500">{s.setup}</p>
               <p className="text-lg font-bold text-neutral-900">{s.aiScore}/100</p>
-            </Link>
+            </div>
           ))}
           {(!topOpportunities || topOpportunities.length === 0) && (
             <p className="text-sm text-neutral-500">Belum ada saham dengan skor menonjol hari ini.</p>
@@ -205,12 +227,12 @@ export default async function DashboardPage() {
         <p className="text-xs font-semibold uppercase text-neutral-500">Market Radar</p>
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-5">
           {radarMeta.map((r) => (
-            <Link key={r.key} href={`/opportunities?type=${r.key}`} className="block rounded-lg bg-neutral-50 p-3 text-center transition hover:bg-neutral-100 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+            <div key={r.key} className="rounded-lg bg-neutral-50 p-3 text-center">
               <p className="text-lg">{r.icon}</p>
               <p className="text-xs text-neutral-500">{r.label}</p>
               <p className="text-lg font-bold text-neutral-900">{radar[r.key] ?? 0}</p>
               <p className="mt-1 text-[11px] leading-tight text-neutral-400">{r.desc(radar[r.key] ?? 0)}</p>
-            </Link>
+            </div>
           ))}
         </div>
       </div>
@@ -225,10 +247,3 @@ export default async function DashboardPage() {
     </div>
   )
 }
-
-
-
-
-
-
-
