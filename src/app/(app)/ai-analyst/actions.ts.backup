@@ -1,0 +1,68 @@
+'use server'
+
+import Anthropic from '@anthropic-ai/sdk'
+import { createClient } from '@/lib/supabase/server'
+import { analyzeStock } from '@/lib/analysis/technical'
+
+const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
+
+export async function askAnalyst(question: string, ticker: string) {
+  const supabase = await createClient()
+
+  let context = ''
+  if (ticker) {
+    const cleanTicker = ticker.trim().toUpperCase()
+    const { data: stock } = await supabase.from('stocks').select('*').eq('ticker', cleanTicker).single()
+    const { data: price } = await supabase.from('latest_prices').select('*').eq('ticker', cleanTicker).single()
+
+    if (stock) {
+      context = `Data saham ${cleanTicker} (${stock.name}): harga terakhir Rp${price?.price ?? 'tidak tersedia'}, volume ${price?.volume ?? 'tidak tersedia'}.`
+    }
+  }
+
+  const systemPrompt = `Kamu adalah AI Analyst di aplikasi StockFamily, terminal analisa saham IDX. Jawab pertanyaan user tentang saham secara singkat, jelas, dan berdasarkan data yang diberikan jika ada. Selalu ingatkan bahwa ini bukan rekomendasi investasi resmi, hanya alat bantu analisa.${context ? `\n\nKonteks data terkini: ${context}` : ''}`
+
+  const response = await anthropic.messages.create({
+    model: 'claude-sonnet-5',
+    max_tokens: 500,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: question }],
+  })
+
+  const textBlock = response.content.find((block) => block.type === 'text')
+  return textBlock && 'text' in textBlock ? textBlock.text : 'Maaf, tidak ada jawaban.'
+}
+
+export async function getLocalAnalysis(ticker: string) {
+  const supabase = await createClient()
+  const cleanTicker = ticker.trim().toUpperCase()
+
+  const { data: candles } = await supabase
+    .from('stock_ohlcv')
+    .select('*')
+    .eq('ticker', cleanTicker)
+    .order('date', { ascending: true })
+
+  if (!candles || candles.length < 20) {
+    return null
+  }
+
+  const { data: stock } = await supabase.from('stocks').select('*').eq('ticker', cleanTicker).single()
+
+  const analysis = analyzeStock(
+    candles.map((c) => ({
+      date: c.date,
+      open: Number(c.open),
+      high: Number(c.high),
+      low: Number(c.low),
+      close: Number(c.close),
+      volume: Number(c.volume),
+    }))
+  )
+
+  return {
+    ticker: cleanTicker,
+    name: stock?.name ?? cleanTicker,
+    ...analysis,
+  }
+}

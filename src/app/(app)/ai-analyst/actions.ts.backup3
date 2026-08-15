@@ -1,0 +1,157 @@
+﻿'use server'
+
+import { GoogleGenAI } from '@google/genai'
+import { createClient } from '@/lib/supabase/server'
+import { analyzeStock } from '@/lib/analysis/technical'
+
+const gemini = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY,
+})
+
+export async function askAnalyst(question: string, ticker: string) {
+  const supabase = await createClient()
+
+  let marketContext = ''
+  let technicalContext = ''
+
+  if (ticker) {
+    const cleanTicker = ticker.trim().toUpperCase()
+
+    const { data: stock } = await supabase
+      .from('stocks')
+      .select('*')
+      .eq('ticker', cleanTicker)
+      .single()
+
+    const { data: price } = await supabase
+      .from('latest_prices')
+      .select('*')
+      .eq('ticker', cleanTicker)
+      .single()
+
+    if (stock) {
+      marketContext = JSON.stringify(
+        {
+          ticker: cleanTicker,
+          name: stock.name,
+          latestPrice: price?.price ?? null,
+          volume: price?.volume ?? null,
+        },
+        null,
+        2
+      )
+    }
+
+    // Ambil seluruh hasil technical engine StockFamily
+    const localAnalysis = await getLocalAnalysis(cleanTicker)
+
+    if (localAnalysis) {
+      technicalContext = JSON.stringify(localAnalysis, null, 2)
+    }
+  }
+
+  const systemPrompt = `Kamu adalah StockFamily AI Analyst, AI analyst khusus saham Indonesia (IDX).
+
+PERAN:
+Kamu bertugas membantu user memahami kondisi saham berdasarkan DATA YANG DIBERIKAN oleh StockFamily.
+
+PRINSIP UTAMA:
+1. DATA DARI STOCKFAMILY ADALAH SUMBER UTAMA.
+2. Jangan mengarang harga, volume, indikator, support, resistance, trend, momentum, setup, atau angka lainnya.
+3. Jangan menghitung ulang indikator jika nilainya sudah diberikan oleh Technical Engine StockFamily.
+4. Jika suatu data tidak tersedia, katakan dengan jelas bahwa data tersebut tidak tersedia.
+5. Bedakan DATA FAKTUAL dengan INTERPRETASI.
+6. Jangan menjanjikan profit.
+7. Jangan memberikan kepastian bahwa harga akan naik atau turun.
+8. Jangan membuat target harga tanpa dasar data yang diberikan.
+9. Gunakan bahasa Indonesia yang profesional tetapi mudah dipahami.
+10. Fokus pada analisis saham IDX dan konteks trading/investasi.
+11. Selalu sertakan disclaimer singkat bahwa analisis ini bukan rekomendasi investasi resmi.
+
+FORMAT ANALISIS:
+
+### Ringkasan
+Berikan kesimpulan kondisi saham secara singkat.
+
+### Data Teknikal
+Gunakan indikator yang benar-benar tersedia dari Technical Engine StockFamily.
+
+### Trend & Momentum
+Jelaskan kondisi trend dan momentum berdasarkan data.
+
+### Support & Resistance
+Hanya tampilkan level yang memang tersedia di data.
+
+### Risiko
+Jelaskan risiko utama berdasarkan data yang tersedia.
+
+### Trade Plan
+Jika data memungkinkan, jelaskan skenario:
+- Bullish / breakout
+- Pullback
+- Bearish / breakdown
+
+Jangan membuat level baru jika tidak tersedia.
+
+### Kesimpulan
+Berikan kesimpulan singkat dan objektif.
+
+Jika data teknikal tidak cukup untuk menjawab pertanyaan, katakan bahwa data belum cukup.
+
+DATA MARKET STOCKFAMILY:
+${marketContext || 'Tidak ada data market spesifik.'}
+
+DATA TECHNICAL ENGINE STOCKFAMILY:
+${technicalContext || 'Data technical analysis tidak tersedia.'}
+`
+
+  const prompt = `${systemPrompt}
+
+PERTANYAAN USER:
+${question}`
+
+  const response = await gemini.models.generateContent({
+    model: 'gemini-3.6-flash',
+    contents: prompt,
+  })
+
+  return response.text || 'Maaf, tidak ada jawaban.'
+}
+
+export async function getLocalAnalysis(ticker: string) {
+  const supabase = await createClient()
+  const cleanTicker = ticker.trim().toUpperCase()
+
+  const { data: candles } = await supabase
+    .from('stock_ohlcv')
+    .select('*')
+    .eq('ticker', cleanTicker)
+    .order('date', { ascending: true })
+
+  if (!candles || candles.length < 20) {
+    return null
+  }
+
+  const { data: stock } = await supabase
+    .from('stocks')
+    .select('*')
+    .eq('ticker', cleanTicker)
+    .single()
+
+  const analysis = analyzeStock(
+    candles.map((c) => ({
+      date: c.date,
+      open: Number(c.open),
+      high: Number(c.high),
+      low: Number(c.low),
+      close: Number(c.close),
+      volume: Number(c.volume),
+    }))
+  )
+
+  return {
+    ticker: cleanTicker,
+    name: stock?.name ?? cleanTicker,
+    ...analysis,
+  }
+}
