@@ -28,17 +28,10 @@ function actionLabel(action: string) {
   const map: Record<string, string> = {
     BUY_ON_CONFIRMATION: 'BUY ON CONFIRMATION',
     WAIT_CONFIRMATION: 'WAIT CONFIRMATION',
-    WAIT_PULLBACK: "DON'T CHASE — WAIT PULLBACK",
+    WAIT_PULLBACK: 'WAIT PULLBACK',
     AVOID: 'AVOID',
   }
   return map[action] ?? action
-}
-
-function actionColor(action: string) {
-  if (action === 'BUY_ON_CONFIRMATION') return 'bg-emerald-600'
-  if (action === 'WAIT_PULLBACK') return 'bg-amber-600'
-  if (action === 'AVOID') return 'bg-red-600'
-  return 'bg-neutral-900'
 }
 
 async function getCandles(supabase: any, ticker: string): Promise<Candle[]> {
@@ -89,6 +82,7 @@ export default async function StockPage({
   const candles = await getCandles(supabase, symbol)
 
   let raw: ReturnType<typeof analyzeStock> | null = null
+
   if (candles.length >= 20) {
     try {
       raw = analyzeStock(candles)
@@ -97,9 +91,6 @@ export default async function StockPage({
     }
   }
 
-  // Adaptasi hasil engine ke bentuk tampilan. Skor komponen dibulatkan
-  // DI SINI SAJA (lapisan tampilan) — bukan di engine — supaya aiScore
-  // tetap dihitung dari nilai presisi penuh, sesuai prinsip.
   const analysis = raw
     ? {
         score: raw.aiScore,
@@ -107,7 +98,6 @@ export default async function StockPage({
         changePercent: raw.changePercent,
         signal: raw.label,
         setup: raw.setup,
-        breakoutConfirmed: raw.breakout,
         action: raw.tradePlan.finalAction,
         actionReason: raw.tradePlan.actionReason,
         ma20: raw.ma20,
@@ -123,39 +113,43 @@ export default async function StockPage({
         invalidation: raw.tradePlan.invalidation,
         target1: raw.tradePlan.target1,
         target2: raw.tradePlan.target2,
-        entryZoneLow: raw.tradePlan.retestLow,
-        entryZoneHigh: raw.tradePlan.retestHigh,
         risk: raw.riskLevel,
         riskPercent: raw.tradePlan.riskPercent,
         rr: raw.tradePlan.riskReward,
         reasons: raw.reasons,
-        trendScore: Math.round(raw.trendScore),
-        momentumScore: Math.round(raw.momentumScore),
-        volumeScore: Math.round(raw.volumeScore),
-        structureScore: Math.round(raw.structureScore),
-        riskScore: Math.round(raw.riskScore),
+        trendScore: raw.trendScore,
+        momentumScore: raw.momentumScore,
+        volumeScore: raw.volumeScore,
+        structureScore: raw.structureScore,
+        riskScore: raw.riskScore,
       }
     : null
 
   const marketBias = snapshot?.market_bias_label ?? 'UNKNOWN'
-  const showBreakoutBadge = analysis?.setup === 'BREAKOUT' || analysis?.setup === 'MOMENTUM'
 
   return (
     <div className="space-y-6 p-6">
       <div>
-        <Link href="/opportunities" className="text-sm text-neutral-500 hover:text-neutral-900">
+        <Link
+          href="/opportunities"
+          className="text-sm text-neutral-500 hover:text-neutral-900"
+        >
           ← Kembali ke Opportunities
         </Link>
 
         <div className="mt-3 flex items-end justify-between gap-4">
           <div>
             <h1 className="text-3xl font-bold text-neutral-900">{symbol}</h1>
-            <p className="mt-1 text-sm text-neutral-500">{stock?.name ?? 'Stock Intelligence'}</p>
+            <p className="mt-1 text-sm text-neutral-500">
+              {stock?.name ?? 'Stock Intelligence'}
+            </p>
           </div>
 
           {analysis && (
             <div className="text-right">
-              <p className="text-xs uppercase text-neutral-400">Opportunity Score</p>
+              <p className="text-xs uppercase text-neutral-400">
+                Opportunity Score
+              </p>
               <p
                 className={`text-3xl font-bold ${
                   analysis.score >= 70
@@ -177,21 +171,31 @@ export default async function StockPage({
         <div className="rounded-xl border border-neutral-200 bg-white p-4">
           <p className="text-xs text-neutral-500">Last Price</p>
           <p className="mt-2 text-xl font-bold text-neutral-900">
-            {price(analysis?.lastPrice ?? Number(latestPrice?.price ?? 0))}
+            {price(
+              analysis?.lastPrice ??
+                Number(latestPrice?.price ?? 0)
+            )}
           </p>
           <p className="mt-1 text-xs text-neutral-500">
-            {pct(analysis?.changePercent ?? Number(latestPrice?.change_percent ?? 0))}
+            {pct(
+              analysis?.changePercent ??
+                Number(latestPrice?.change_percent ?? 0)
+            )}
           </p>
         </div>
 
         <div className="rounded-xl border border-neutral-200 bg-white p-4">
           <p className="text-xs text-neutral-500">Market Bias</p>
-          <p className="mt-2 text-lg font-bold text-neutral-900">{marketBias}</p>
+          <p className="mt-2 text-lg font-bold text-neutral-900">
+            {marketBias}
+          </p>
         </div>
 
         <div className="rounded-xl border border-neutral-200 bg-white p-4">
           <p className="text-xs text-neutral-500">Signal</p>
-          <p className="mt-2 text-lg font-bold text-neutral-900">{analysis?.signal ?? 'DATA NEEDED'}</p>
+          <p className="mt-2 text-lg font-bold text-neutral-900">
+            {analysis?.signal ?? 'DATA NEEDED'}
+          </p>
         </div>
 
         <div className="rounded-xl border border-neutral-200 bg-white p-4">
@@ -204,147 +208,194 @@ export default async function StockPage({
 
       {!analysis ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-5">
-          <p className="text-sm font-semibold text-amber-900">Technical analysis belum dapat dihitung.</p>
+          <p className="text-sm font-semibold text-amber-900">
+            Technical analysis belum dapat dihitung.
+          </p>
           <p className="mt-2 text-sm leading-6 text-amber-800">
-            StockFamily membutuhkan minimal 20 candle OHLCV untuk menghitung MA20, MA50, RSI, momentum, volume ratio,
-            support/resistance dan market structure.
+            StockFamily membutuhkan minimal 20 candle OHLCV untuk menghitung
+            MA20, MA50, RSI, momentum, volume ratio, support/resistance dan
+            market structure.
           </p>
           <p className="mt-3 text-xs text-amber-700">
-            Latest price tersedia, tetapi sistem tidak akan mengarang level teknikal tanpa data candle.
+            Latest price tersedia, tetapi sistem tidak akan mengarang level
+            teknikal tanpa data candle.
           </p>
         </div>
       ) : (
         <>
           <div className="rounded-xl border border-neutral-200 bg-white p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs font-semibold uppercase text-neutral-500">Technical Setup</p>
-                <h2 className="mt-1 text-xl font-bold text-neutral-900">{labelSetup(analysis.setup)}</h2>
+                <p className="text-xs font-semibold uppercase text-neutral-500">
+                  Technical Setup
+                </p>
+                <h2 className="mt-1 text-xl font-bold text-neutral-900">
+                  {labelSetup(analysis.setup)}
+                </h2>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                {showBreakoutBadge && (
-                  <span
-                    className={`rounded-lg px-3 py-2 text-xs font-bold text-white ${
-                      analysis.breakoutConfirmed ? 'bg-emerald-600' : 'bg-neutral-400'
-                    }`}
-                  >
-                    {analysis.breakoutConfirmed ? 'BREAKOUT CONFIRMED' : 'PRE-BREAKOUT'}
-                  </span>
-                )}
-                <span className={`rounded-lg px-3 py-2 text-xs font-bold text-white ${actionColor(analysis.action)}`}>
-                  {actionLabel(analysis.action)}
-                </span>
+              <div className="rounded-lg bg-neutral-900 px-3 py-2 text-xs font-bold text-white">
+                {actionLabel(analysis.action)}
               </div>
             </div>
 
             <div className="mt-5 grid grid-cols-2 gap-4 md:grid-cols-4">
               <div>
                 <p className="text-xs text-neutral-500">MA20</p>
-                <p className="mt-1 font-semibold text-neutral-900">{price(analysis.ma20)}</p>
+                <p className="mt-1 font-semibold text-neutral-900">
+                  {price(analysis.ma20)}
+                </p>
               </div>
+
               <div>
                 <p className="text-xs text-neutral-500">MA50</p>
-                <p className="mt-1 font-semibold text-neutral-900">{price(analysis.ma50)}</p>
+                <p className="mt-1 font-semibold text-neutral-900">
+                  {price(analysis.ma50)}
+                </p>
               </div>
+
               <div>
                 <p className="text-xs text-neutral-500">RSI 14</p>
-                <p className="mt-1 font-semibold text-neutral-900">{analysis.rsi14?.toFixed(1) ?? '-'}</p>
+                <p className="mt-1 font-semibold text-neutral-900">
+                  {analysis.rsi14?.toFixed(1) ?? '-'}
+                </p>
               </div>
+
               <div>
                 <p className="text-xs text-neutral-500">Volume Ratio</p>
                 <p className="mt-1 font-semibold text-neutral-900">
-                  {analysis.volumeRatio ? `${analysis.volumeRatio.toFixed(1)}x` : '-'}
+                  {analysis.volumeRatio
+                    ? `${analysis.volumeRatio.toFixed(1)}x`
+                    : '-'}
                 </p>
               </div>
             </div>
           </div>
 
           <div className="rounded-xl border border-neutral-200 bg-white p-5">
-            <p className="text-xs font-semibold uppercase text-neutral-500">Market Structure</p>
+            <p className="text-xs font-semibold uppercase text-neutral-500">
+              Market Structure
+            </p>
+
             <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-4">
               <div>
                 <p className="text-xs text-neutral-500">Structure</p>
-                <p className="mt-1 font-bold text-neutral-900">{analysis.marketStructure}</p>
+                <p className="mt-1 font-bold text-neutral-900">
+                  {analysis.marketStructure}
+                </p>
               </div>
+
               <div>
                 <p className="text-xs text-neutral-500">Support</p>
-                <p className="mt-1 font-bold text-emerald-700">{price(analysis.support)}</p>
+                <p className="mt-1 font-bold text-emerald-700">
+                  {price(analysis.support)}
+                </p>
               </div>
+
               <div>
                 <p className="text-xs text-neutral-500">Resistance</p>
-                <p className="mt-1 font-bold text-red-700">{price(analysis.resistance)}</p>
+                <p className="mt-1 font-bold text-red-700">
+                  {price(analysis.resistance)}
+                </p>
               </div>
+
               <div>
                 <p className="text-xs text-neutral-500">Momentum 5D</p>
-                <p className="mt-1 font-bold text-neutral-900">{pct(analysis.momentum5d)}</p>
+                <p className="mt-1 font-bold text-neutral-900">
+                  {pct(analysis.momentum5d)}
+                </p>
               </div>
             </div>
           </div>
 
           <div className="rounded-xl border border-neutral-200 bg-white p-5">
-            <p className="text-xs font-semibold uppercase text-neutral-500">Trade Plan</p>
+            <p className="text-xs font-semibold uppercase text-neutral-500">
+              Trade Plan
+            </p>
+
             <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-5">
               <div className="rounded-lg bg-neutral-50 p-4">
                 <p className="text-xs text-neutral-500">Entry</p>
-                <p className="mt-1 font-bold text-neutral-900">{price(analysis.entry)}</p>
-              </div>
-              <div className="rounded-lg bg-neutral-50 p-4">
-                <p className="text-xs text-neutral-500">Trigger</p>
-                <p className="mt-1 font-bold text-neutral-900">{price(analysis.trigger)}</p>
-              </div>
-              <div className="rounded-lg bg-neutral-50 p-4">
-                <p className="text-xs text-neutral-500">Invalidation</p>
-                <p className="mt-1 font-bold text-red-600">{price(analysis.invalidation)}</p>
-              </div>
-              <div className="rounded-lg bg-neutral-50 p-4">
-                <p className="text-xs text-neutral-500">Target 1</p>
-                <p className="mt-1 font-bold text-emerald-600">{price(analysis.target1)}</p>
-              </div>
-              <div className="rounded-lg bg-neutral-50 p-4">
-                <p className="text-xs text-neutral-500">Target 2</p>
-                <p className="mt-1 font-bold text-emerald-600">{price(analysis.target2)}</p>
+                <p className="mt-1 font-bold text-neutral-900">
+                  {price(analysis.entry)}
+                </p>
               </div>
 
-              {analysis.entryZoneLow != null && analysis.entryZoneHigh != null && (
-                <div className="rounded-lg bg-neutral-50 p-4">
-                  <p className="text-xs text-neutral-500">Entry Zone (Retest)</p>
-                  <p className="mt-1 font-bold text-neutral-900">
-                    {price(analysis.entryZoneLow)} – {price(analysis.entryZoneHigh)}
-                  </p>
-                </div>
-              )}
+              <div className="rounded-lg bg-neutral-50 p-4">
+                <p className="text-xs text-neutral-500">Trigger</p>
+                <p className="mt-1 font-bold text-neutral-900">
+                  {price(analysis.trigger)}
+                </p>
+              </div>
+
+              <div className="rounded-lg bg-neutral-50 p-4">
+                <p className="text-xs text-neutral-500">Invalidation</p>
+                <p className="mt-1 font-bold text-red-600">
+                  {price(analysis.invalidation)}
+                </p>
+              </div>
+
+              <div className="rounded-lg bg-neutral-50 p-4">
+                <p className="text-xs text-neutral-500">Target 1</p>
+                <p className="mt-1 font-bold text-emerald-600">
+                  {price(analysis.target1)}
+                </p>
+              </div>
+
+              <div className="rounded-lg bg-neutral-50 p-4">
+                <p className="text-xs text-neutral-500">Target 2</p>
+                <p className="mt-1 font-bold text-emerald-600">
+                  {price(analysis.target2)}
+                </p>
+              </div>
             </div>
 
             <div className="mt-4 flex flex-wrap gap-6 border-t border-neutral-100 pt-4">
               <div>
                 <p className="text-xs text-neutral-500">Risk</p>
-                <p className="font-bold text-neutral-900">{analysis.risk}</p>
+                <p className="font-bold text-neutral-900">
+                  {analysis.risk}
+                </p>
               </div>
+
               <div>
                 <p className="text-xs text-neutral-500">Risk %</p>
                 <p className="font-bold text-neutral-900">
-                  {analysis.riskPercent != null ? `${analysis.riskPercent.toFixed(2)}%` : '-'}
+                  {analysis.riskPercent != null
+                    ? `${analysis.riskPercent.toFixed(2)}%`
+                    : '-'}
                 </p>
               </div>
+
               <div>
                 <p className="text-xs text-neutral-500">R:R</p>
                 <p className="font-bold text-neutral-900">
-                  {analysis.rr != null ? `1 : ${analysis.rr.toFixed(2)}` : '-'}
+                  {analysis.rr != null
+                    ? `1 : ${analysis.rr.toFixed(2)}`
+                    : '-'}
                 </p>
               </div>
+
               <div className="flex-1">
                 <p className="text-xs text-neutral-500">Verdict</p>
-                <p className="font-bold text-neutral-900">{analysis.actionReason}</p>
+                <p className="font-bold text-neutral-900">
+                  {analysis.actionReason}
+                </p>
               </div>
             </div>
           </div>
 
           <div className="rounded-xl border border-neutral-200 bg-white p-5">
-            <p className="text-xs font-semibold uppercase text-neutral-500">Why This Stock?</p>
+            <p className="text-xs font-semibold uppercase text-neutral-500">
+              Why This Stock?
+            </p>
+
             <div className="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">
               {analysis.reasons.map((reason, index) => (
-                <div key={`${reason}-${index}`} className="rounded-lg bg-neutral-50 p-3 text-sm text-neutral-700">
+                <div
+                  key={`${reason}-${index}`}
+                  className="rounded-lg bg-neutral-50 p-3 text-sm text-neutral-700"
+                >
                   {reason}
                 </div>
               ))}
@@ -352,24 +403,31 @@ export default async function StockPage({
           </div>
 
           <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-5">
-            <p className="text-xs font-semibold uppercase text-neutral-500">Score Breakdown</p>
+            <p className="text-xs font-semibold uppercase text-neutral-500">
+              Score Breakdown
+            </p>
+
             <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-5">
               <div>
                 <p className="text-xs text-neutral-500">Trend</p>
                 <p className="font-bold">{analysis.trendScore}</p>
               </div>
+
               <div>
                 <p className="text-xs text-neutral-500">Momentum</p>
                 <p className="font-bold">{analysis.momentumScore}</p>
               </div>
+
               <div>
                 <p className="text-xs text-neutral-500">Volume</p>
                 <p className="font-bold">{analysis.volumeScore}</p>
               </div>
+
               <div>
                 <p className="text-xs text-neutral-500">Structure</p>
                 <p className="font-bold">{analysis.structureScore}</p>
               </div>
+
               <div>
                 <p className="text-xs text-neutral-500">Risk</p>
                 <p className="font-bold">{analysis.riskScore}</p>

@@ -280,35 +280,7 @@ function buildTradePlan({
   })
 
   if (breakdown || setup === 'BREAKDOWN' || lastPrice <= 0) {
-    return empty(
-      'NO_SETUP',
-      'AVOID',
-      'Struktur bearish atau breakdown. Belum ada setup long yang valid.',
-    )
-  }
-
-  if (setup === 'NONE') {
-    return empty(
-      'NO_SETUP',
-      'AVOID',
-      'Belum ditemukan setup trading yang jelas.',
-    )
-  }
-
-  if (setup === 'RANGE') {
-    const trigger =
-      resistance != null
-        ? roundToTick(resistance + tickSize(resistance))
-        : null
-
-    return {
-      ...empty(
-        'WAIT_CONFIRMATION',
-        'WAIT_CONFIRMATION',
-        'Harga masih berada dalam range. Tunggu breakout resistance atau pullback yang lebih jelas.',
-      ),
-      trigger,
-    }
+    return empty('NO_SETUP', 'AVOID', 'Struktur bearish/breakdown. Belum ada setup long yang valid.')
   }
 
   let entry: number | null = null
@@ -317,119 +289,18 @@ function buildTradePlan({
   let retestLow: number | null = null
   let retestHigh: number | null = null
 
-  // ------------------------------------------------------------
-  // BREAKOUT
-  // ------------------------------------------------------------
   if (setup === 'BREAKOUT' && resistance != null) {
     const tick = tickSize(resistance)
-
-    // Confirmation must be above the previous resistance.
     trigger = roundToTick(resistance + tick)
-
-    // Invalidation is below the broken resistance.
+    entry = trigger
     const buffer = Math.max(tick, resistance * 0.02)
     invalidation = roundToTick(resistance - buffer)
-
     retestLow = roundToTick(resistance * 0.985)
     retestHigh = roundToTick(resistance * 1.01)
-
-    // If price has already broken out but is too extended,
-    // do not chase the price.
-    if (lastPrice >= trigger * 1.05) {
-      return {
-        ...empty(
-          'WAIT_CONFIRMATION',
-          'WAIT_PULLBACK',
-          'Breakout sudah terjadi tetapi harga terlalu jauh dari trigger. Tunggu pullback atau retest.',
-        ),
-        trigger,
-        invalidation,
-        retestLow,
-        retestHigh,
-      }
-    }
-
-    entry = Math.max(lastPrice, trigger)
-  }
-
-  // ------------------------------------------------------------
-  // MOMENTUM
-  // ------------------------------------------------------------
-  else if (setup === 'MOMENTUM') {
-    // Momentum is NOT automatically an entry.
-    // If price is still below resistance, the trigger must be
-    // above resistance.
-    if (resistance != null && lastPrice < resistance) {
-      const tick = tickSize(resistance)
-
-      trigger = roundToTick(resistance + tick)
-      entry = trigger
-
-      const buffer = Math.max(tick, resistance * 0.02)
-      invalidation = roundToTick(resistance - buffer)
-
-      retestLow = roundToTick(resistance * 0.985)
-      retestHigh = roundToTick(resistance * 1.01)
-    } else if (resistance != null && lastPrice >= resistance) {
-      // Price is already at/above resistance.
-      // Treat this as a confirmation attempt, but do not chase
-      // an excessively extended move.
-      const tick = tickSize(resistance)
-
-      trigger = roundToTick(resistance + tick)
-
-      const buffer = Math.max(tick, resistance * 0.02)
-      invalidation = roundToTick(resistance - buffer)
-
-      if (lastPrice >= trigger * 1.05) {
-        return {
-          ...empty(
-            'WAIT_CONFIRMATION',
-            'WAIT_PULLBACK',
-            'Momentum sudah terlalu extended dari trigger. Tunggu pullback.',
-          ),
-          trigger,
-          invalidation,
-          retestLow: roundToTick(resistance * 0.985),
-          retestHigh: roundToTick(resistance * 1.01),
-        }
-      }
-
-      entry = Math.max(lastPrice, trigger)
-    } else {
-      // No resistance available.
-      // Use local support for invalidation.
-      const localSupport = recentLow(candles, 5)
-
-      if (localSupport == null || localSupport >= lastPrice) {
-        return empty(
-          'WAIT_CONFIRMATION',
-          'WAIT_CONFIRMATION',
-          'Momentum ada, tetapi level invalidation belum cukup jelas.',
-        )
-      }
-
-      entry = lastPrice
-      trigger = roundToTick(lastPrice)
-
-      const buffer = Math.max(
-        tickSize(localSupport),
-        localSupport * 0.015,
-      )
-
-      invalidation = roundToTick(localSupport - buffer)
-    }
-  }
-
-  // ------------------------------------------------------------
-  // PULLBACK
-  // ------------------------------------------------------------
-  else if (setup === 'PULLBACK') {
+  } else if (setup === 'PULLBACK') {
     entry = lastPrice
     trigger = roundToTick(lastPrice)
-
     const localSupport = recentLow(candles, 5)
-
     const candidateSupport =
       localSupport != null && localSupport < lastPrice
         ? localSupport
@@ -438,96 +309,68 @@ function buildTradePlan({
           : null
 
     if (candidateSupport == null) {
-      return empty(
-        'WAIT_CONFIRMATION',
-        'WAIT_CONFIRMATION',
-        'Belum ditemukan support lokal yang cukup dekat untuk invalidation.',
-      )
+      return empty('WAIT_CONFIRMATION', 'WAIT_CONFIRMATION', 'Belum ditemukan support lokal yang cukup dekat untuk invalidation.')
     }
 
-    const buffer = Math.max(
-      tickSize(candidateSupport),
-      candidateSupport * 0.01,
-    )
-
+    const buffer = Math.max(tickSize(candidateSupport), candidateSupport * 0.01)
     invalidation = roundToTick(candidateSupport - buffer)
-
     retestLow = roundToTick(candidateSupport)
     retestHigh = roundToTick(candidateSupport * 1.02)
-  }
+  } else if (setup === 'MOMENTUM') {
+    entry = lastPrice
+    trigger = roundToTick(lastPrice)
+    const localSupport = recentLow(candles, 5)
+    const candidateSupport =
+      localSupport != null && localSupport < lastPrice
+        ? localSupport
+        : support != null && support < lastPrice
+          ? support
+          : null
 
-  else {
-    return empty(
-      'NO_SETUP',
-      'AVOID',
-      'Setup belum memiliki aturan entry yang valid.',
-    )
-  }
+    if (candidateSupport == null) {
+      return empty('WAIT_CONFIRMATION', 'WAIT_CONFIRMATION', 'Momentum ada, tetapi invalidation lokal belum jelas.')
+    }
 
-  if (
-    entry == null ||
-    invalidation == null ||
-    invalidation >= entry
-  ) {
+    const buffer = Math.max(tickSize(candidateSupport), candidateSupport * 0.015)
+    invalidation = roundToTick(candidateSupport - buffer)
+
+    // Saat momentum sudah extended, area yang dipantau adalah retest support,
+    // bukan harga sekarang. Ini membuat WAIT FOR PULLBACK benar-benar actionable.
+    retestLow = roundToTick(candidateSupport)
+    retestHigh = roundToTick(candidateSupport * 1.02)
+  } else if (setup === 'RANGE') {
     return {
-      ...empty(
-        'WAIT_CONFIRMATION',
-        'WAIT_CONFIRMATION',
-        'Entry atau invalidation belum cukup jelas untuk membentuk trade plan.',
-      ),
+      ...empty('WAIT_CONFIRMATION', 'WAIT_CONFIRMATION', 'Harga masih berada dalam range. Tunggu breakout atau pullback yang lebih jelas.'),
+      trigger: resistance != null ? roundToTick(resistance + tickSize(resistance)) : null,
+    }
+  } else {
+    return empty('NO_SETUP', 'AVOID', 'Belum ditemukan setup trading yang jelas.')
+  }
+
+  if (entry == null || invalidation == null || invalidation >= entry) {
+    return {
+      ...empty('WAIT_CONFIRMATION', 'WAIT_CONFIRMATION', 'Entry atau invalidation belum cukup jelas untuk membentuk trade plan.'),
       entry,
       trigger,
       retestLow,
       retestHigh,
-      invalidation,
     }
   }
 
-  // ------------------------------------------------------------
-  // RISK
-  // ------------------------------------------------------------
-
   const riskPoints = entry - invalidation
-
-  if (riskPoints <= 0) {
-    return empty(
-      'WAIT_CONFIRMATION',
-      'WAIT_CONFIRMATION',
-      'Risk tidak valid karena invalidation berada di atas atau sama dengan entry.',
-    )
-  }
-
   const riskPercent = (riskPoints / entry) * 100
 
-  // Target system:
-  // T1 = 1R
-  // T2 = 2R
-  // T3 = 3R
   let target1 = roundToTick(entry + riskPoints)
   let target2 = roundToTick(entry + riskPoints * 2)
   let target3 = roundToTick(entry + riskPoints * 3)
 
-  // For pullback setups, respect the known resistance if it
-  // lies between entry and the normal T1.
-  if (
-    setup === 'PULLBACK' &&
-    resistance != null &&
-    resistance > entry
-  ) {
+  if (setup === 'PULLBACK' && resistance != null && resistance > entry) {
     target1 = Math.min(target1, roundToTick(resistance))
   }
 
-  if (target1 <= entry) {
-    target1 = roundToTick(entry + tickSize(entry))
-  }
-
-  if (target2 <= target1) {
-    target2 = roundToTick(target1 + riskPoints)
-  }
-
-  if (target3 <= target2) {
-    target3 = roundToTick(target2 + riskPoints)
-  }
+  if (target1 <= entry) target1 = roundToTick(entry + tickSize(entry))
+  if (target2 <= target1) target2 = roundToTick(target1 + riskPoints)
+  if (target3 <= target2) target3 = roundToTick(target2 + riskPoints)
 
   const rewardPoints = target2 - entry
   const riskReward = rewardPoints / riskPoints
@@ -538,185 +381,48 @@ function buildTradePlan({
   const strongScore = aiScore >= 70
   const watchScore = aiScore >= 60
 
-  // ------------------------------------------------------------
-  // ACTION LOGIC
-  // ------------------------------------------------------------
+  let status: TradePlanStatus = riskReward >= 1.5 ? 'VALID' : 'UNATTRACTIVE_RR'
+  let finalAction: FinalAction = 'WAIT_CONFIRMATION'
+  let actionReason = 'Setup belum cukup kuat untuk entry.'
 
-  // 1. Bad R:R always wins.
   if (riskReward < 1.5) {
-    return {
-      status: 'UNATTRACTIVE_RR',
-      entry,
-      trigger,
-      retestLow,
-      retestHigh,
-      invalidation,
-      target1,
-      target2,
-      target3,
-      riskPoints,
-      rewardPoints,
-      riskReward,
-      riskPercent,
-      finalAction: 'AVOID',
-      actionReason: 'R:R di bawah 1:1.5 sehingga trade tidak menarik.',
-    }
+    status = 'UNATTRACTIVE_RR'
+    finalAction = 'AVOID'
+    actionReason = 'R:R di bawah 1:1.5 sehingga trade tidak menarik.'
+  } else if (overbought && highRisk) {
+    status = 'WAIT_CONFIRMATION'
+    finalAction = 'WAIT_PULLBACK'
+    actionReason = 'Momentum sudah extended dan risk tinggi; lebih aman menunggu pullback.'
+  } else if (overbought || (weakVolume && setup === 'MOMENTUM')) {
+    status = 'WAIT_CONFIRMATION'
+    finalAction = 'WAIT_CONFIRMATION'
+    actionReason = overbought
+      ? 'RSI overbought; tunggu konfirmasi lanjutan atau pullback.'
+      : 'Momentum ada tetapi volume belum mendukung.'
+  } else if (setup === 'BREAKOUT' && !breakout) {
+    status = 'WAIT_CONFIRMATION'
+    finalAction = 'WAIT_CONFIRMATION'
+    actionReason = 'Breakout belum terkonfirmasi di atas resistance.'
+  } else if (strongScore && !highRisk) {
+    status = 'VALID'
+    finalAction = 'BUY_ON_CONFIRMATION'
+    actionReason = 'Trend, momentum, struktur, dan R:R mendukung; tetap tunggu trigger.'
+  } else if (watchScore) {
+    status = 'WAIT_CONFIRMATION'
+    finalAction = 'WAIT_CONFIRMATION'
+    actionReason = 'Setup cukup menarik tetapi belum memenuhi seluruh filter kualitas.'
+  } else {
+    status = 'WAIT_CONFIRMATION'
+    finalAction = 'WAIT_CONFIRMATION'
+    actionReason = 'Skor belum cukup kuat untuk entry agresif.'
   }
 
-  // 2. Overbought + high risk = wait for pullback.
-  if (overbought && highRisk) {
-    return {
-      status: 'WAIT_CONFIRMATION',
-      entry,
-      trigger,
-      retestLow,
-      retestHigh,
-      invalidation,
-      target1,
-      target2,
-      target3,
-      riskPoints,
-      rewardPoints,
-      riskReward,
-      riskPercent,
-      finalAction: 'WAIT_PULLBACK',
-      actionReason: 'Momentum sudah extended dan risk tinggi. Lebih aman menunggu pullback.',
-    }
-  }
-
-  // 3. RSI overbought = no aggressive entry.
-  if (overbought) {
-    return {
-      status: 'WAIT_CONFIRMATION',
-      entry,
-      trigger,
-      retestLow,
-      retestHigh,
-      invalidation,
-      target1,
-      target2,
-      target3,
-      riskPoints,
-      rewardPoints,
-      riskReward,
-      riskPercent,
-      finalAction: 'WAIT_CONFIRMATION',
-      actionReason: 'RSI sudah overbought. Tunggu konfirmasi lanjutan atau pullback.',
-    }
-  }
-
-  // 4. Momentum with weak volume = wait.
-  if (weakVolume && setup === 'MOMENTUM') {
-    return {
-      status: 'WAIT_CONFIRMATION',
-      entry,
-      trigger,
-      retestLow,
-      retestHigh,
-      invalidation,
-      target1,
-      target2,
-      target3,
-      riskPoints,
-      rewardPoints,
-      riskReward,
-      riskPercent,
-      finalAction: 'WAIT_CONFIRMATION',
-      actionReason: 'Momentum ada tetapi volume belum mendukung.',
-    }
-  }
-
-  // 5. Pre-breakout momentum must WAIT.
-  // The price has not crossed the resistance yet.
-  if (
-    setup === 'MOMENTUM' &&
-    resistance != null &&
-    lastPrice < resistance
-  ) {
-    return {
-      status: 'WAIT_CONFIRMATION',
-      entry,
-      trigger,
-      retestLow,
-      retestHigh,
-      invalidation,
-      target1,
-      target2,
-      target3,
-      riskPoints,
-      rewardPoints,
-      riskReward,
-      riskPercent,
-      finalAction: 'WAIT_CONFIRMATION',
-      actionReason: `Momentum positif tetapi harga masih di bawah resistance ${resistance}. Tunggu breakout dan close di atas trigger ${trigger}.`,
-    }
-  }
-
-  // 6. Breakout setup must actually be confirmed.
-  if (setup === 'BREAKOUT' && !breakout) {
-    return {
-      status: 'WAIT_CONFIRMATION',
-      entry,
-      trigger,
-      retestLow,
-      retestHigh,
-      invalidation,
-      target1,
-      target2,
-      target3,
-      riskPoints,
-      rewardPoints,
-      riskReward,
-      riskPercent,
-      finalAction: 'WAIT_CONFIRMATION',
-      actionReason: 'Breakout belum terkonfirmasi di atas resistance.',
-    }
-  }
-
-  // 7. Strong setup with acceptable risk.
-  if (strongScore && !highRisk) {
-    return {
-      status: 'VALID',
-      entry,
-      trigger,
-      retestLow,
-      retestHigh,
-      invalidation,
-      target1,
-      target2,
-      target3,
-      riskPoints,
-      rewardPoints,
-      riskReward,
-      riskPercent,
-      finalAction: 'BUY_ON_CONFIRMATION',
-      actionReason: 'Trend, momentum, struktur, volume, dan R:R mendukung. Entry hanya setelah trigger terkonfirmasi.',
-    }
-  }
-
-  // 8. Watchlist quality.
-  if (watchScore) {
-    return {
-      status: 'WAIT_CONFIRMATION',
-      entry,
-      trigger,
-      retestLow,
-      retestHigh,
-      invalidation,
-      target1,
-      target2,
-      target3,
-      riskPoints,
-      rewardPoints,
-      riskReward,
-      riskPercent,
-      finalAction: 'WAIT_CONFIRMATION',
-      actionReason: 'Setup cukup menarik tetapi belum memenuhi seluruh filter kualitas.',
-    }
+  if (finalAction !== 'BUY_ON_CONFIRMATION' && status === 'VALID') {
+    status = 'WAIT_CONFIRMATION'
   }
 
   return {
-    status: 'WAIT_CONFIRMATION',
+    status,
     entry,
     trigger,
     retestLow,
@@ -729,10 +435,12 @@ function buildTradePlan({
     rewardPoints,
     riskReward,
     riskPercent,
-    finalAction: 'WAIT_CONFIRMATION',
-    actionReason: 'Skor belum cukup kuat untuk entry agresif.',
+    finalAction,
+    actionReason,
   }
 }
+
+
 export function analyzeStock(candles: Candle[]) {
   if (!candles || candles.length < 2) throw new Error('Minimal dibutuhkan 2 candle untuk analisis.')
 
