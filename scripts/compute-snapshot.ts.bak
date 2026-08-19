@@ -1,4 +1,4 @@
-﻿import { config } from 'dotenv'
+import { config } from 'dotenv'
 config({ path: '.env.local' })
 
 import { getSupabaseAdmin } from '../src/lib/supabase/admin'
@@ -57,15 +57,12 @@ async function run() {
   let newLow = 0
   let analyzed = 0
 
-  type RadarStock = { ticker: string; name: string; aiScore: number; setup: string; price: number }
-  type RadarEntry = { count: number; stocks: RadarStock[] }
-
-  const radar: Record<string, RadarEntry> = {
-    breakoutWatch: { count: 0, stocks: [] },
-    momentum: { count: 0, stocks: [] },
-    nearSupport: { count: 0, stocks: [] },
-    unusualVolume: { count: 0, stocks: [] },
-    distribution: { count: 0, stocks: [] },
+  const radarCounts = {
+    breakoutWatch: 0,
+    momentum: 0,
+    nearSupport: 0,
+    unusualVolume: 0,
+    distribution: 0,
   }
 
   const scored: { ticker: string; name: string; aiScore: number; setup: string; label: string }[] = []
@@ -97,34 +94,11 @@ async function run() {
     if (result.lastPrice >= maxClose) newHigh++
     if (result.lastPrice <= minClose) newLow++
 
-    const stockEntry: RadarStock = {
-      ticker,
-      name: nameMap.get(ticker) ?? ticker,
-      aiScore: result.aiScore,
-      setup: result.setup,
-      price: result.lastPrice,
-    }
-
-    if (result.setup === 'BREAKOUT') {
-      radar.breakoutWatch.count++
-      radar.breakoutWatch.stocks.push(stockEntry)
-    }
-    if (result.setup === 'MOMENTUM') {
-      radar.momentum.count++
-      radar.momentum.stocks.push(stockEntry)
-    }
-    if (result.nearSupport) {
-      radar.nearSupport.count++
-      radar.nearSupport.stocks.push(stockEntry)
-    }
-    if (result.volumeRatio != null && result.volumeRatio > 2) {
-      radar.unusualVolume.count++
-      radar.unusualVolume.stocks.push(stockEntry)
-    }
-    if (result.breakdown) {
-      radar.distribution.count++
-      radar.distribution.stocks.push(stockEntry)
-    }
+    if (result.setup === 'BREAKOUT') radarCounts.breakoutWatch++
+    if (result.setup === 'MOMENTUM') radarCounts.momentum++
+    if (result.nearSupport) radarCounts.nearSupport++
+    if (result.volumeRatio != null && result.volumeRatio > 2) radarCounts.unusualVolume++
+    if (result.breakdown) radarCounts.distribution++
 
     scored.push({
       ticker,
@@ -138,12 +112,6 @@ async function run() {
   }
 
   console.log(`Berhasil analisa: ${analyzed}/${universe.length} saham`)
-
-  for (const key of Object.keys(radar)) {
-    radar[key].stocks = radar[key].stocks
-      .sort((a, b) => b.aiScore - a.aiScore)
-      .slice(0, 20)
-  }
 
   const aboveMA20Pct = analyzed > 0 ? (aboveMA20 / analyzed) * 100 : 0
   const aboveMA50Pct = analyzed > 0 ? (aboveMA50 / analyzed) * 100 : 0
@@ -162,6 +130,7 @@ async function run() {
       ihsgAnalysis.riskScore * 0.1
   )
 
+  // Threshold eksplisit, fixed, konsisten dengan skor — tidak subjektif.
   let marketBiasLabel = 'NEUTRAL'
   if (marketBiasScore >= 80) marketBiasLabel = 'STRONG BULLISH'
   else if (marketBiasScore >= 65) marketBiasLabel = 'BULLISH'
@@ -191,7 +160,7 @@ async function run() {
     unchanged,
     new_high_90d: newHigh,
     new_low_90d: newLow,
-    radar,
+    radar: radarCounts,
     top_opportunities: topOpportunities,
   })
 

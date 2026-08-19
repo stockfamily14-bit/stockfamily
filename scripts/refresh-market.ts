@@ -19,7 +19,6 @@ function isWeekdayWIB(): boolean {
   const now = new Date()
   const wib = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Jakarta' }))
   const day = wib.getDay()
-
   return day >= 1 && day <= 5
 }
 
@@ -27,16 +26,12 @@ function isMarketHoursWIB(): boolean {
   if (!isWeekdayWIB()) return false
 
   const now = new Date()
-  const wib = new Date(
-    now.toLocaleString('en-US', { timeZone: 'Asia/Jakarta' })
-  )
+  const wib = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Jakarta' }))
 
   const hour = wib.getHours()
   const minute = wib.getMinutes()
   const time = hour * 60 + minute
 
-  // IDX regular trading window.
-  // We use a broad market-active window here.
   const marketOpen = 9 * 60
   const marketClose = 16 * 60
 
@@ -99,36 +94,21 @@ async function refreshPrices(): Promise<RefreshResult> {
         .map((q) => ({
           ticker: q.symbol.replace('.JK', ''),
           price: Number(q.regularMarketPrice),
-          volume:
-            q.regularMarketVolume != null
-              ? Number(q.regularMarketVolume)
-              : null,
+          volume: q.regularMarketVolume != null ? Number(q.regularMarketVolume) : null,
         }))
 
       if (priceRows.length > 0) {
-        const { error: insertError } = await supabaseAdmin
-          .from('stock_prices')
-          .insert(priceRows)
-
-        if (insertError) {
-          throw new Error(insertError.message)
-        }
+        const { error: insertError } = await supabaseAdmin.from('stock_prices').insert(priceRows)
+        if (insertError) throw new Error(insertError.message)
       }
 
       successfulBatches++
-
       console.log(
-        `Batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(
-          tickers.length / BATCH_SIZE
-        )} sukses — ${priceRows.length} quotes`
+        `Batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(tickers.length / BATCH_SIZE)} sukses — ${priceRows.length} quotes`
       )
     } catch (err) {
       failedBatches++
-
-      console.error(
-        `Batch ${Math.floor(i / BATCH_SIZE) + 1} gagal:`,
-        err
-      )
+      console.error(`Batch ${Math.floor(i / BATCH_SIZE) + 1} gagal:`, err)
     }
 
     if (i + BATCH_SIZE < tickers.length) {
@@ -136,15 +116,8 @@ async function refreshPrices(): Promise<RefreshResult> {
     }
   }
 
-  // ----------------------------------------------------------
-  // IHSG LIVE QUOTE
-  //
-  // IHSG dikecualikan dari batch di atas karena kode Yahoo-nya
-  // beda (^JKSE, bukan .JK). Kita ambil terpisah di sini supaya
-  // harga IHSG di Dashboard ikut ter-update tiap 15 menit,
-  // bukan cuma 1x sehari lewat daily backfill.
-  // ----------------------------------------------------------
-
+  // IHSG live quote — dikecualikan dari batch di atas karena kode Yahoo-nya
+  // beda (^JKSE, bukan .JK).
   let ihsgQuote: IhsgQuote | null = null
 
   try {
@@ -154,28 +127,19 @@ async function refreshPrices(): Promise<RefreshResult> {
       ihsgQuote = {
         price: Number(quote.regularMarketPrice),
         changePercent:
-          quote.regularMarketChangePercent != null
-            ? Number(quote.regularMarketChangePercent)
-            : null,
+          quote.regularMarketChangePercent != null ? Number(quote.regularMarketChangePercent) : null,
       }
 
-      const { error: ihsgInsertError } = await supabaseAdmin
-        .from('stock_prices')
-        .insert({
-          ticker: 'IHSG',
-          price: ihsgQuote.price,
-          volume:
-            quote.regularMarketVolume != null
-              ? Number(quote.regularMarketVolume)
-              : null,
-        })
+      const { error: ihsgInsertError } = await supabaseAdmin.from('stock_prices').insert({
+        ticker: 'IHSG',
+        price: ihsgQuote.price,
+        volume: quote.regularMarketVolume != null ? Number(quote.regularMarketVolume) : null,
+      })
 
       if (ihsgInsertError) {
         console.error('Gagal simpan quote IHSG:', ihsgInsertError.message)
       } else {
-        console.log(
-          `IHSG live: ${ihsgQuote.price} (${ihsgQuote.changePercent?.toFixed(2)}%)`
-        )
+        console.log(`IHSG live: ${ihsgQuote.price} (${ihsgQuote.changePercent?.toFixed(2)}%)`)
       }
     }
   } catch (err) {
@@ -184,9 +148,7 @@ async function refreshPrices(): Promise<RefreshResult> {
 
   const success = failedBatches === 0
 
-  console.log(
-    `Refresh selesai — sukses: ${successfulBatches}, gagal: ${failedBatches}`
-  )
+  console.log(`Refresh selesai — sukses: ${successfulBatches}, gagal: ${failedBatches}`)
 
   return {
     success,
@@ -223,10 +185,7 @@ async function getCandles(ticker: string): Promise<Candle[]> {
     volume: Number(r.volume),
   }))
 
-  // Jangan gunakan candle terakhir jika volumenya 0.
-  // Biasanya menandakan candle belum valid / belum selesai.
   const last = candles[candles.length - 1]
-
   if (last && last.volume === 0 && candles.length > 1) {
     candles = candles.slice(0, -1)
   }
@@ -238,23 +197,15 @@ async function getCandles(ticker: string): Promise<Candle[]> {
 // COMPUTE MARKET SNAPSHOT
 // ============================================================
 
-async function computeSnapshot(
-  refresh: RefreshResult
-): Promise<boolean> {
+type RadarStock = { ticker: string; name: string; aiScore: number; setup: string }
+
+async function computeSnapshot(refresh: RefreshResult): Promise<boolean> {
   console.log('Hitung ulang market snapshot...')
 
-  // Jangan publish snapshot baru jika refresh Yahoo gagal sebagian.
   if (!refresh.success) {
-    console.warn(
-      'Refresh tidak penuh. Snapshot baru TIDAK dipublish.'
-    )
-
+    console.warn('Refresh tidak penuh. Snapshot baru TIDAK dipublish.')
     return false
   }
-
-  // ----------------------------------------------------------
-  // IHSG
-  // ----------------------------------------------------------
 
   const ihsgCandles = await getCandles('IHSG')
 
@@ -265,73 +216,35 @@ async function computeSnapshot(
 
   const ihsgAnalysis = analyzeStock(ihsgCandles)
 
-  // Harga & change % yang ditampilkan pakai quote live (kalau ada),
-  // supaya tidak "macet" di harga penutupan kemarin selama jam bursa.
-  // Skor teknikal (trend/momentum/volume/risk) tetap dari histori harian.
   const displayPrice = refresh.ihsgQuote?.price ?? ihsgAnalysis.lastPrice
-  const displayChangePercent =
-    refresh.ihsgQuote?.changePercent ?? ihsgAnalysis.changePercent
+  const displayChangePercent = refresh.ihsgQuote?.changePercent ?? ihsgAnalysis.changePercent
 
-  // ----------------------------------------------------------
-  // ACTIVE UNIVERSE
-  // Top 300 berdasarkan volume terbaru.
-  // Keputusan ini DISENGAJA untuk menjaga engine ringan.
-  // ----------------------------------------------------------
-
-  const { data: topPrices, error: topPricesError } =
-    await supabaseAdmin
-      .from('latest_prices')
-      .select('*')
-      .neq('ticker', 'IHSG')
-      .order('volume', {
-        ascending: false,
-        nullsFirst: false,
-      })
-      .limit(300)
+  const { data: topPrices, error: topPricesError } = await supabaseAdmin
+    .from('latest_prices')
+    .select('*')
+    .neq('ticker', 'IHSG')
+    .order('volume', { ascending: false, nullsFirst: false })
+    .limit(300)
 
   if (topPricesError) {
-    console.error(
-      'Gagal mengambil active universe:',
-      topPricesError.message
-    )
+    console.error('Gagal mengambil active universe:', topPricesError.message)
     return false
   }
 
-  const universe = (topPrices ?? [])
-    .map((p) => String(p.ticker).trim().toUpperCase())
-    .filter(Boolean)
+  const universe = (topPrices ?? []).map((p) => String(p.ticker).trim().toUpperCase()).filter(Boolean)
 
-  console.log(
-    `Active Universe: ${universe.length} saham (Top 300 volume)`
-  )
+  console.log(`Active Universe: ${universe.length} saham (Top 300 volume)`)
 
-  // ----------------------------------------------------------
-  // STOCK NAMES
-  // ----------------------------------------------------------
-
-  const { data: stockNames } = await supabaseAdmin
-    .from('stocks')
-    .select('ticker, name')
-    .in('ticker', universe)
-
-  const nameMap = new Map(
-    (stockNames ?? []).map((s) => [s.ticker, s.name])
-  )
-
-  // ----------------------------------------------------------
-  // BREADTH / RADAR
-  // ----------------------------------------------------------
+  const { data: stockNames } = await supabaseAdmin.from('stocks').select('ticker, name').in('ticker', universe)
+  const nameMap = new Map((stockNames ?? []).map((s) => [s.ticker, s.name]))
 
   let aboveMA20 = 0
   let aboveMA50 = 0
-
   let advancing = 0
   let declining = 0
   let unchanged = 0
-
   let newHigh = 0
   let newLow = 0
-
   let analyzed = 0
 
   const radarCounts = {
@@ -342,25 +255,23 @@ async function computeSnapshot(
     distribution: 0,
   }
 
-  const scored: {
-    ticker: string
-    name: string
-    aiScore: number
-    setup: string
-    label: string
-  }[] = []
+  // Daftar saham PER KATEGORI radar — inilah yang bikin halaman
+  // /opportunities?type=X bisa nampilin saham yang benar-benar sesuai.
+  const radarStocks: Record<string, RadarStock[]> = {
+    breakoutWatch: [],
+    momentum: [],
+    nearSupport: [],
+    unusualVolume: [],
+    distribution: [],
+  }
 
-  // ----------------------------------------------------------
-  // ANALYZE ACTIVE UNIVERSE
-  // ----------------------------------------------------------
+  const scored: RadarStock[] = []
 
   for (const ticker of universe) {
     const candles = await getCandles(ticker)
-
     if (candles.length < 20) continue
 
     let result
-
     try {
       result = analyzeStock(candles)
     } catch (err) {
@@ -370,203 +281,90 @@ async function computeSnapshot(
 
     analyzed++
 
-    // -------------------------
-    // TREND / BREADTH
-    // -------------------------
-
-    if (
-      result.ma20 != null &&
-      result.lastPrice > result.ma20
-    ) {
-      aboveMA20++
-    }
-
-    if (
-      result.ma50 != null &&
-      result.lastPrice > result.ma50
-    ) {
-      aboveMA50++
-    }
-
-    // -------------------------
-    // ADVANCE / DECLINE
-    // -------------------------
+    if (result.ma20 != null && result.lastPrice > result.ma20) aboveMA20++
+    if (result.ma50 != null && result.lastPrice > result.ma50) aboveMA50++
 
     if (result.changePercent != null) {
-      if (result.changePercent > 0) {
-        advancing++
-      } else if (result.changePercent < 0) {
-        declining++
-      } else {
-        unchanged++
-      }
+      if (result.changePercent > 0) advancing++
+      else if (result.changePercent < 0) declining++
+      else unchanged++
     }
-
-    // -------------------------
-    // NEW HIGH / LOW 90D
-    // -------------------------
 
     const recent90 = candles.slice(-90)
-
     if (recent90.length >= 2) {
       const current = recent90[recent90.length - 1]
-
-      // Bandingkan dengan 89 candle sebelumnya.
-      // Ini membuat "new high 90D" benar-benar berarti
-      // harga sekarang menembus high 90 hari sebelumnya.
       const previous89 = recent90.slice(0, -1)
-
-      const previousHigh90 = Math.max(
-        ...previous89.map((c) => c.close)
-      )
-
-      const previousLow90 = Math.min(
-        ...previous89.map((c) => c.close)
-      )
-
-      if (current.close >= previousHigh90) {
-        newHigh++
-      }
-
-      if (current.close <= previousLow90) {
-        newLow++
-      }
+      const previousHigh90 = Math.max(...previous89.map((c) => c.close))
+      const previousLow90 = Math.min(...previous89.map((c) => c.close))
+      if (current.close >= previousHigh90) newHigh++
+      if (current.close <= previousLow90) newLow++
     }
 
-    // -------------------------
-    // MARKET RADAR
-    // -------------------------
-
-    if (
-      result.nearResistance ||
-      result.setup === 'BREAKOUT'
-    ) {
-      radarCounts.breakoutWatch++
-    }
-
-    if (result.setup === 'MOMENTUM') {
-      radarCounts.momentum++
-    }
-
-    if (result.nearSupport) {
-      radarCounts.nearSupport++
-    }
-
-    if (
-      result.volumeRatio != null &&
-      result.volumeRatio > 2
-    ) {
-      radarCounts.unusualVolume++
-    }
-
-    if (result.breakdown) {
-      radarCounts.distribution++
-    }
-
-    // -------------------------
-    // OPPORTUNITY SCORE
-    // -------------------------
-
-    scored.push({
+    const stockEntry: RadarStock = {
       ticker,
       name: nameMap.get(ticker) ?? ticker,
       aiScore: result.aiScore,
       setup: result.setup,
-      label: result.label,
-    })
+    }
+
+    if (result.nearResistance || result.setup === 'BREAKOUT') {
+      radarCounts.breakoutWatch++
+      radarStocks.breakoutWatch.push(stockEntry)
+    }
+    if (result.setup === 'MOMENTUM') {
+      radarCounts.momentum++
+      radarStocks.momentum.push(stockEntry)
+    }
+    if (result.nearSupport) {
+      radarCounts.nearSupport++
+      radarStocks.nearSupport.push(stockEntry)
+    }
+    if (result.volumeRatio != null && result.volumeRatio > 2) {
+      radarCounts.unusualVolume++
+      radarStocks.unusualVolume.push(stockEntry)
+    }
+    if (result.breakdown) {
+      radarCounts.distribution++
+      radarStocks.distribution.push(stockEntry)
+    }
+
+    scored.push(stockEntry)
   }
 
-  // ----------------------------------------------------------
-  // BREADTH SCORE
-  // ----------------------------------------------------------
-
-  const aboveMA20Pct =
-    analyzed > 0
-      ? (aboveMA20 / analyzed) * 100
-      : 0
-
-  const aboveMA50Pct =
-    analyzed > 0
-      ? (aboveMA50 / analyzed) * 100
-      : 0
-
-  const advanceDeclineRatio =
-    declining > 0
-      ? advancing / declining
-      : advancing > 0
-        ? 2
-        : 1
-
-  let breadthScore =
-    (aboveMA20Pct + aboveMA50Pct) / 2
-
-  if (advanceDeclineRatio > 1.5) {
-    breadthScore += 10
-  } else if (advanceDeclineRatio < 0.67) {
-    breadthScore -= 10
+  // Urutkan tiap kategori dari skor tertinggi, batasi 30 saham per kategori
+  // supaya ukuran datanya tidak membengkak.
+  for (const key of Object.keys(radarStocks)) {
+    radarStocks[key] = radarStocks[key].sort((a, b) => b.aiScore - a.aiScore).slice(0, 30)
   }
 
-  breadthScore = Math.max(
-    0,
-    Math.min(100, breadthScore)
-  )
+  const aboveMA20Pct = analyzed > 0 ? (aboveMA20 / analyzed) * 100 : 0
+  const aboveMA50Pct = analyzed > 0 ? (aboveMA50 / analyzed) * 100 : 0
+  const advanceDeclineRatio = declining > 0 ? advancing / declining : advancing > 0 ? 2 : 1
 
-  // ----------------------------------------------------------
-  // IHSG MARKET SCORE
-  //
-  // FINAL WEIGHT:
-  // Trend      30%
-  // Momentum   20%
-  // Breadth    25%
-  // Volume     15%
-  // Risk       10%
-  // ----------------------------------------------------------
+  let breadthScore = (aboveMA20Pct + aboveMA50Pct) / 2
+  if (advanceDeclineRatio > 1.5) breadthScore += 10
+  else if (advanceDeclineRatio < 0.67) breadthScore -= 10
+  breadthScore = Math.max(0, Math.min(100, breadthScore))
 
   const marketBiasScore = Math.round(
-    ihsgAnalysis.trendScore * 0.30 +
-      ihsgAnalysis.momentumScore * 0.20 +
+    ihsgAnalysis.trendScore * 0.3 +
+      ihsgAnalysis.momentumScore * 0.2 +
       breadthScore * 0.25 +
       ihsgAnalysis.volumeScore * 0.15 +
-      ihsgAnalysis.riskScore * 0.10
+      ihsgAnalysis.riskScore * 0.1
   )
 
-  // ----------------------------------------------------------
-  // MARKET BIAS LABEL
-  // ----------------------------------------------------------
-
   let marketBiasLabel = 'NEUTRAL'
-
-  if (marketBiasScore >= 80) {
-    marketBiasLabel = 'STRONG BULLISH'
-  } else if (marketBiasScore >= 65) {
-    marketBiasLabel = 'BULLISH'
-  } else if (marketBiasScore >= 50) {
-    marketBiasLabel = 'NEUTRAL'
-  } else if (marketBiasScore >= 35) {
-    marketBiasLabel = 'BEARISH'
-  } else {
-    marketBiasLabel = 'STRONG BEARISH'
-  }
-
-  // ----------------------------------------------------------
-  // TOP OPPORTUNITIES
-  // ----------------------------------------------------------
+  if (marketBiasScore >= 80) marketBiasLabel = 'STRONG BULLISH'
+  else if (marketBiasScore >= 65) marketBiasLabel = 'BULLISH'
+  else if (marketBiasScore >= 50) marketBiasLabel = 'NEUTRAL'
+  else if (marketBiasScore >= 35) marketBiasLabel = 'BEARISH'
+  else marketBiasLabel = 'STRONG BEARISH'
 
   const topOpportunities = scored
-    .filter((s) => s.label !== 'BEARISH')
+    .filter((s) => s.setup !== 'BREAKDOWN')
     .sort((a, b) => b.aiScore - a.aiScore)
     .slice(0, 5)
-
-  // ----------------------------------------------------------
-  // AI MARKET INSIGHT
-  //
-  // IMPORTANT:
-  // Jangan copy ai_brief dari snapshot sebelumnya.
-  //
-  // Untuk menjaga konsistensi dan menghindari biaya LLM
-  // setiap refresh, V1 menggunakan deterministic insight
-  // berdasarkan snapshot yang baru dihitung.
-  // ----------------------------------------------------------
 
   const aiBrief = buildMarketInsight({
     marketBiasLabel,
@@ -580,68 +378,51 @@ async function computeSnapshot(
     riskScore: ihsgAnalysis.riskScore,
   })
 
-  // ----------------------------------------------------------
-  // SAVE ONE COMPLETE SNAPSHOT
-  // ----------------------------------------------------------
+  const { error } = await supabaseAdmin.from('market_snapshot').insert({
+    fetched_at: refresh.fetchedAt,
+    computed_at: new Date().toISOString(),
 
-  const { error } = await supabaseAdmin
-    .from('market_snapshot')
-    .insert({
-      fetched_at: refresh.fetchedAt,
-      computed_at: new Date().toISOString(),
+    refresh_status: 'SUCCESS',
+    successful_batches: refresh.successfulBatches,
+    failed_batches: refresh.failedBatches,
 
-      refresh_status: 'SUCCESS',
-      successful_batches: refresh.successfulBatches,
-      failed_batches: refresh.failedBatches,
+    ihsg_price: displayPrice,
+    ihsg_change_percent: displayChangePercent,
 
-      ihsg_price: displayPrice,
-      ihsg_change_percent: displayChangePercent,
+    market_bias_score: marketBiasScore,
+    market_bias_label: marketBiasLabel,
 
-      market_bias_score: marketBiasScore,
-      market_bias_label: marketBiasLabel,
+    trend_score: ihsgAnalysis.trendScore,
+    momentum_score: ihsgAnalysis.momentumScore,
+    breadth_score: Math.round(breadthScore),
+    volume_score: ihsgAnalysis.volumeScore,
+    risk_score: ihsgAnalysis.riskScore,
 
-      trend_score: ihsgAnalysis.trendScore,
-      momentum_score: ihsgAnalysis.momentumScore,
-      breadth_score: Math.round(breadthScore),
-      volume_score: ihsgAnalysis.volumeScore,
-      risk_score: ihsgAnalysis.riskScore,
+    above_ma20_pct: aboveMA20Pct,
+    above_ma50_pct: aboveMA50Pct,
 
-      above_ma20_pct: aboveMA20Pct,
-      above_ma50_pct: aboveMA50Pct,
+    advancing,
+    declining,
+    unchanged,
 
-      advancing,
-      declining,
-      unchanged,
+    new_high_90d: newHigh,
+    new_low_90d: newLow,
 
-      new_high_90d: newHigh,
-      new_low_90d: newLow,
+    radar: radarCounts,
+    radar_stocks: radarStocks,
+    top_opportunities: topOpportunities,
 
-      radar: radarCounts,
-      top_opportunities: topOpportunities,
-
-      ai_brief: aiBrief,
-    })
+    ai_brief: aiBrief,
+  })
 
   if (error) {
-    console.error(
-      'Gagal menyimpan market snapshot:',
-      error.message
-    )
-
+    console.error('Gagal menyimpan market snapshot:', error.message)
     return false
   }
 
-  console.log(
-    `Snapshot tersimpan: ${marketBiasLabel} (${marketBiasScore}/100)`
-  )
-
-  console.log(
-    `IHSG: ${displayPrice} (${displayChangePercent?.toFixed(2)}%)`
-  )
-
-  console.log(
-    `Analyzed: ${analyzed} stocks`
-  )
+  console.log(`Snapshot tersimpan: ${marketBiasLabel} (${marketBiasScore}/100)`)
+  console.log(`IHSG: ${displayPrice} (${displayChangePercent?.toFixed(2)}%)`)
+  console.log(`Analyzed: ${analyzed} stocks`)
 
   return true
 }
@@ -667,83 +448,35 @@ function buildMarketInsight(data: {
   }
   riskScore: number
 }): string {
-  const {
-    marketBiasLabel,
-    marketBiasScore,
-    aboveMA20Pct,
-    aboveMA50Pct,
-    advancing,
-    declining,
-    unchanged,
-    radarCounts,
-    riskScore,
-  } = data
+  const { marketBiasLabel, marketBiasScore, aboveMA20Pct, advancing, declining, radarCounts, riskScore } = data
 
   const parts: string[] = []
 
-  parts.push(
-    `IHSG saat ini berada dalam kondisi ${marketBiasLabel.toLowerCase()} dengan market score ${marketBiasScore}/100.`
-  )
+  parts.push(`IHSG saat ini berada dalam kondisi ${marketBiasLabel.toLowerCase()} dengan market score ${marketBiasScore}/100.`)
 
   if (aboveMA20Pct >= 60) {
-    parts.push(
-      `${aboveMA20Pct.toFixed(0)}% active universe berada di atas MA20, menunjukkan participation jangka pendek yang cukup kuat.`
-    )
+    parts.push(`${aboveMA20Pct.toFixed(0)}% active universe berada di atas MA20, menunjukkan participation jangka pendek yang cukup kuat.`)
   } else if (aboveMA20Pct < 40) {
-    parts.push(
-      `Hanya ${aboveMA20Pct.toFixed(0)}% active universe berada di atas MA20, sehingga breadth jangka pendek masih lemah.`
-    )
+    parts.push(`Hanya ${aboveMA20Pct.toFixed(0)}% active universe berada di atas MA20, sehingga breadth jangka pendek masih lemah.`)
   } else {
-    parts.push(
-      `Breadth jangka pendek masih mixed dengan ${aboveMA20Pct.toFixed(0)}% active universe berada di atas MA20.`
-    )
+    parts.push(`Breadth jangka pendek masih mixed dengan ${aboveMA20Pct.toFixed(0)}% active universe berada di atas MA20.`)
   }
 
   if (advancing > declining) {
-    parts.push(
-      `Advancing stocks (${advancing}) masih lebih banyak daripada declining (${declining}).`
-    )
+    parts.push(`Advancing stocks (${advancing}) masih lebih banyak daripada declining (${declining}).`)
   } else if (declining > advancing) {
-    parts.push(
-      `Declining stocks (${declining}) lebih dominan dibanding advancing (${advancing}).`
-    )
+    parts.push(`Declining stocks (${declining}) lebih dominan dibanding advancing (${advancing}).`)
   } else {
-    parts.push(
-      `Advancing dan declining stocks relatif seimbang (${advancing} vs ${declining}).`
-    )
+    parts.push(`Advancing dan declining stocks relatif seimbang (${advancing} vs ${declining}).`)
   }
 
-  if (radarCounts.breakoutWatch > 0) {
-    parts.push(
-      `${radarCounts.breakoutWatch} saham masuk radar breakout.`
-    )
-  }
+  if (radarCounts.breakoutWatch > 0) parts.push(`${radarCounts.breakoutWatch} saham masuk radar breakout.`)
+  if (radarCounts.unusualVolume > 0) parts.push(`${radarCounts.unusualVolume} saham menunjukkan unusual volume.`)
+  if (radarCounts.distribution > 0) parts.push(`${radarCounts.distribution} saham menunjukkan indikasi distribution/breakdown.`)
 
-  if (radarCounts.unusualVolume > 0) {
-    parts.push(
-      `${radarCounts.unusualVolume} saham menunjukkan unusual volume.`
-    )
-  }
-
-  if (radarCounts.distribution > 0) {
-    parts.push(
-      `${radarCounts.distribution} saham menunjukkan indikasi distribution/breakdown.`
-    )
-  }
-
-  if (riskScore >= 70) {
-    parts.push(
-      'Risk score relatif terkendali.'
-    )
-  } else if (riskScore <= 40) {
-    parts.push(
-      'Volatilitas dan risk condition perlu diperhatikan.'
-    )
-  } else {
-    parts.push(
-      'Risk condition berada pada level moderat.'
-    )
-  }
+  if (riskScore >= 70) parts.push('Risk score relatif terkendali.')
+  else if (riskScore <= 40) parts.push('Volatilitas dan risk condition perlu diperhatikan.')
+  else parts.push('Risk condition berada pada level moderat.')
 
   return parts.join(' ')
 }
@@ -761,25 +494,15 @@ async function shouldRefreshOutsideMarket(): Promise<boolean> {
     .maybeSingle()
 
   if (error) {
-    console.error(
-      'Gagal membaca snapshot terakhir:',
-      error.message
-    )
-
+    console.error('Gagal membaca snapshot terakhir:', error.message)
     return true
   }
 
-  if (!latestSnapshot?.fetched_at) {
-    return true
-  }
+  if (!latestSnapshot?.fetched_at) return true
 
-  const lastFetched = new Date(
-    latestSnapshot.fetched_at
-  ).getTime()
-
+  const lastFetched = new Date(latestSnapshot.fetched_at).getTime()
   const ageMs = Date.now() - lastFetched
 
-  // Outside market: refresh maksimal setiap 60 menit.
   return ageMs >= 60 * 60 * 1000
 }
 
@@ -789,44 +512,28 @@ async function shouldRefreshOutsideMarket(): Promise<boolean> {
 
 async function run() {
   const force = process.argv.includes('--force')
-
   const marketOpen = isMarketHoursWIB()
 
   if (!force) {
     if (marketOpen) {
-      console.log(
-        'IDX market aktif — menjalankan refresh.'
-      )
+      console.log('IDX market aktif — menjalankan refresh.')
     } else {
-      const shouldRefresh =
-        await shouldRefreshOutsideMarket()
-
+      const shouldRefresh = await shouldRefreshOutsideMarket()
       if (!shouldRefresh) {
-        console.log(
-          'Di luar jam market dan snapshot masih fresh. Skip refresh.'
-        )
+        console.log('Di luar jam market dan snapshot masih fresh. Skip refresh.')
         return
       }
-
-      console.log(
-        'Di luar jam market tetapi snapshot sudah >60 menit. Refresh.'
-      )
+      console.log('Di luar jam market tetapi snapshot sudah >60 menit. Refresh.')
     }
   } else {
-    console.log(
-      'Force mode aktif — refresh tetap dijalankan.'
-    )
+    console.log('Force mode aktif — refresh tetap dijalankan.')
   }
 
   const refresh = await refreshPrices()
-
   const success = await computeSnapshot(refresh)
 
   if (!success) {
-    console.error(
-      'Refresh selesai tetapi snapshot baru tidak dipublish.'
-    )
-
+    console.error('Refresh selesai tetapi snapshot baru tidak dipublish.')
     process.exitCode = 1
     return
   }

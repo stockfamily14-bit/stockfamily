@@ -1,6 +1,5 @@
-import { createClient } from '@/lib/supabase/server'
+﻿import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
-import DashboardRefresh from './dashboard-refresh'
 
 function qualLabel(score: number, positive: string, neutral: string, negative: string) {
   if (score >= 65) return positive
@@ -42,7 +41,7 @@ const radarMeta = [
   { key: 'momentum', label: 'Momentum', icon: '\u{1F525}', desc: (n: number) => `${n} saham menunjukkan momentum positif` },
   { key: 'nearSupport', label: 'Near Support', icon: '\u{1F3AF}', desc: (n: number) => `${n} saham berada dekat area support` },
   { key: 'unusualVolume', label: 'Unusual Volume', icon: '\u{1F4CA}', desc: (n: number) => `${n} saham dengan volume tidak biasa` },
-  { key: 'distribution', label: 'Distribution', icon: '\u{26A0}\u{FE0F}', desc: (n: number) => `${n} saham menunjukkan tekanan jual` },
+  { key: 'distribution', label: 'Distribution', icon: '\u{26A0}\u{FE0F}', desc: (n: number) =>`${n} saham menunjukkan tekanan jual` },
 ]
 
 const biasColor: Record<string, string> = {
@@ -83,7 +82,7 @@ export default async function DashboardPage() {
   }
 
   const brief = snapshot.ai_brief ?? null
-  const radar = snapshot.radar as Record<string, number>
+  const radar = snapshot.radar as Record<string, { count: number; stocks: any[] }>
   const topOpportunities = snapshot.top_opportunities as { ticker: string; name: string; aiScore: number; setup: string }[]
   const breadthInsight = getBreadthInsight(snapshot)
 
@@ -150,7 +149,7 @@ export default async function DashboardPage() {
 
       <div className="rounded-xl border border-neutral-200 p-5">
         <div className="flex items-baseline justify-between">
-          <p className="text-xs font-semibold uppercase text-neutral-500">Market Breadth - IDX Stocks</p>
+          <p className="text-xs font-semibold uppercase text-neutral-500">Market Breadth - IDXStocks</p>
           <p className="text-sm font-semibold text-neutral-900">{Number(snapshot.breadth_score)}/100</p>
         </div>
         <p className="mt-1 text-sm font-semibold text-neutral-900">
@@ -205,11 +204,11 @@ export default async function DashboardPage() {
         <p className="text-xs font-semibold uppercase text-neutral-500">Market Radar</p>
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-5">
           {radarMeta.map((r) => (
-            <Link key={r.key} href={`/opportunities?type=${r.key}`} className="block rounded-lg bg-neutral-50 p-3 text-center transition hover:bg-neutral-100 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+            <Link key={r.key} href={`/opportunities?type=${r.key}`} className="block rounded-lg bg-neutral-50 p-3 text-center transition hover:bg-neutral-100 focus:outline-none focus:ring-2focus:ring-emerald-500">
               <p className="text-lg">{r.icon}</p>
               <p className="text-xs text-neutral-500">{r.label}</p>
-              <p className="text-lg font-bold text-neutral-900">{radar[r.key] ?? 0}</p>
-              <p className="mt-1 text-[11px] leading-tight text-neutral-400">{r.desc(radar[r.key] ?? 0)}</p>
+              <p className="text-lg font-bold text-neutral-900">{radar[r.key]?.count ?? 0}</p>
+              <p className="mt-1 text-[11px] leading-tight text-neutral-400">{r.desc(radar[r.key]?.count ?? 0)}</p>
             </Link>
           ))}
         </div>
@@ -225,10 +224,3 @@ export default async function DashboardPage() {
     </div>
   )
 }
-
-
-
-
-
-
-

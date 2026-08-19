@@ -1,4 +1,4 @@
-﻿import Link from 'next/link'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 
 const radarMeta = [
@@ -36,8 +36,6 @@ type Opportunity = {
   setup: string
 }
 
-type RadarMap = Record<string, { count: number; stocks: Opportunity[] }>
-
 export default async function OpportunitiesPage({
   searchParams,
 }: {
@@ -55,14 +53,11 @@ export default async function OpportunitiesPage({
     .limit(1)
     .single()
 
-  const topOpportunities =
+  const opportunities =
     (snapshot?.top_opportunities as Opportunity[] | null) ?? []
 
-  const radar = (snapshot?.radar as RadarMap | null) ?? {}
-
-  const opportunities = selectedType
-    ? radar[selectedType]?.stocks ?? []
-    : topOpportunities
+  const radar =
+    (snapshot?.radar as Record<string, number> | null) ?? {}
 
   const selectedRadar = radarMeta.find((item) => item.key === selectedType)
 
@@ -89,7 +84,7 @@ export default async function OpportunitiesPage({
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-5">
         {radarMeta.map((item) => {
           const active = selectedType === item.key
-          const count = radar[item.key]?.count ?? 0
+          const count = radar[item.key] ?? 0
 
           return (
             <Link
@@ -204,9 +199,10 @@ export default async function OpportunitiesPage({
         </p>
 
         <p className="mt-2 text-xs leading-5 text-neutral-500">
-          Opportunity kini memakai radar category eksplisit per saham
-          (breakout, momentum, near support, unusual volume, distribution)
-          yang dihitung ulang setiap kali snapshot market dibuat.
+          Opportunity saat ini menggunakan top_opportunities dari market
+          snapshot. Radar merupakan klasifikasi awal berdasarkan engine
+          market. Tahap berikutnya dapat menambahkan radar category eksplisit
+          pada setiap saham.
         </p>
       </div>
 
