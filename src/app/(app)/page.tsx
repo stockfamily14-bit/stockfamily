@@ -1,6 +1,7 @@
-﻿import { createClient } from '@/lib/supabase/server'
+import { createClient } from '@/lib/supabase/server'
 import Link from 'next/link'
-import TopOpportunitiesSection from '@/components/dashboard/TopOpportunities'
+import RefreshButton from './RefreshButton'
+import { analyzeStock, type Candle } from '@/lib/analysis/technical'
 
 function qualLabel(score: number, positive: string, neutral: string, negative: string) {
   if (score >= 65) return positive
@@ -27,7 +28,7 @@ function getBreadthInsight(snapshot: any) {
   let note = `${Number(snapshot.above_ma20_pct).toFixed(0)}% saham masih berada di atas MA20.`
   if (ratio < 0.5 && score >= 45) {
     label += ' / Weakening'
-    note += " Namun saham turun (" + declining + ") jauh lebih banyak dibanding naik (" + advancing + ") hari ini - tekanan jual jangka pendek meningkat."
+    note += ` Namun saham turun (${declining}) jauh lebih banyak dibanding naik (${advancing}) hari ini — tekanan jual jangka pendek meningkat.`
   } else if (ratio > 1.5) {
     note += ` Saham naik (${advancing}) juga lebih banyak dibanding turun (${declining}), mendukung struktur breadth yang sehat.`
   } else {
@@ -35,6 +36,16 @@ function getBreadthInsight(snapshot: any) {
   }
 
   return { emoji, label, note }
+}
+
+function getFreshness(computedAt: string | null | undefined) {
+  if (!computedAt) return { status: 'ERROR', label: 'Data belum tersedia', dot: 'bg-red-500', color: 'text-red-600' }
+
+  const ageMin = (Date.now() - new Date(computedAt).getTime()) / 60000
+
+  if (ageMin <= 20) return { status: 'LIVE', label: `LIVE • ${Math.round(ageMin)} menit lalu`, dot: 'bg-emerald-500', color: 'text-emerald-600' }
+  if (ageMin <= 90) return { status: 'RECENT', label: `RECENT • ${Math.round(ageMin)} menit lalu`, dot: 'bg-amber-500', color: 'text-amber-600' }
+  return { status: 'STALE', label: `STALE • ${Math.round(ageMin)} menit lalu`, dot: 'bg-red-500', color: 'text-red-600' }
 }
 
 const radarMeta = [
@@ -48,7 +59,7 @@ const radarMeta = [
 const biasColor: Record<string, string> = {
   'STRONG BULLISH': 'text-emerald-600',
   BULLISH: 'text-emerald-600',
-  NEUTRAL: 'text-amber-500',
+  NEUTRAL: 'text-amber-600',
   BEARISH: 'text-red-600',
   'STRONG BEARISH': 'text-red-600',
 }
@@ -61,63 +72,30 @@ const biasEmoji: Record<string, string> = {
   'STRONG BEARISH': '🔴',
 }
 
-// Helper untuk mengekstrak data radar fleksibel (Mendukung camelCase & snake_case)
-function getRadarData(radar: any, topOpportunities: any[], key: string) {
-  const possibleKeys: Record<string, string[]> = {
-    breakoutWatch: ['breakoutWatch', 'breakout_watch', 'breakout', 'breakout_watchlist'],
-    momentum: ['momentum', 'momentum_watch', 'bullish_momentum'],
-    nearSupport: ['nearSupport', 'near_support', 'support', 'buy_on_weakness'],
-    unusualVolume: ['unusualVolume', 'unusual_volume', 'volume_spike', 'volume'],
-    distribution: ['distribution', 'distribution_watch', 'sell_pressure', 'breakdown'],
-  }
+const actionColor: Record<string, string> = {
+  BUY_ON_CONFIRMATION: 'bg-emerald-600',
+  WAIT_PULLBACK: 'bg-amber-600',
+  AVOID: 'bg-red-600',
+  WAIT_CONFIRMATION: 'bg-neutral-500',
+}
 
-  const keysToCheck = possibleKeys[key] || [key]
-  let rawData: any = null
+const actionLabel: Record<string, string> = {
+  BUY_ON_CONFIRMATION: 'BUY ON CONFIRMATION',
+  WAIT_PULLBACK: "DON'T CHASE",
+  AVOID: 'AVOID',
+  WAIT_CONFIRMATION: 'WAIT CONFIRMATION',
+}
 
-  if (radar && typeof radar === 'object') {
-    for (const k of keysToCheck) {
-      if (radar[k] !== undefined && radar[k] !== null) {
-        rawData = radar[k]
-        break
-      }
-    }
-  }
-
-  let count = 0
-  let stocks: any[] = []
-
-  if (rawData) {
-    if (Array.isArray(rawData)) {
-      stocks = rawData
-      count = rawData.length
-    } else if (typeof rawData === 'object') {
-      stocks = rawData.stocks || rawData.items || rawData.tickers || rawData.data || []
-      count = rawData.count ?? stocks.length
-    } else if (typeof rawData === 'number') {
-      count = rawData
-    }
-  }
-
-  // Fallback: Jika array radar kosong, ekstrak kandidat dari topOpportunities
-  if (stocks.length === 0 && topOpportunities && Array.isArray(topOpportunities)) {
-    if (key === 'breakoutWatch') {
-      stocks = topOpportunities.filter(s => s.setup?.toUpperCase().includes('BREAKOUT'))
-    } else if (key === 'momentum') {
-      stocks = topOpportunities.filter(s => s.setup?.toUpperCase().includes('MOMENTUM') || (s.aiScore && s.aiScore >= 85))
-    } else if (key === 'nearSupport') {
-      stocks = topOpportunities.filter(s => s.setup?.toUpperCase().includes('SUPPORT') || s.setup?.toUpperCase().includes('BOW'))
-    } else if (key === 'unusualVolume') {
-      stocks = topOpportunities.filter(s => s.setup?.toUpperCase().includes('VOLUME'))
-    } else if (key === 'distribution') {
-      stocks = topOpportunities.filter(s => s.setup?.toUpperCase().includes('DISTRIBUTION') || s.setup?.toUpperCase().includes('SELL'))
-    }
-
-    if (count === 0 && stocks.length > 0) {
-      count = stocks.length
-    }
-  }
-
-  return { count, stocks }
+async function getCandles(supabase: any, ticker: string): Promise<Candle[]> {
+  const { data } = await supabase.from('stock_ohlcv').select('*').eq('ticker', ticker).order('date', { ascending: true })
+  return (data ?? []).map((r: any) => ({
+    date: r.date,
+    open: Number(r.open),
+    high: Number(r.high),
+    low: Number(r.low),
+    close: Number(r.close),
+    volume: Number(r.volume),
+  }))
 }
 
 export default async function DashboardPage() {
@@ -134,38 +112,54 @@ export default async function DashboardPage() {
     return (
       <div className="p-6">
         <h1 className="text-2xl font-semibold text-neutral-900">Dashboard</h1>
-        <p className="mt-2 text-sm text-neutral-500">
-          Snapshot market belum tersedia. Jalankan script compute-snapshot dulu.
-        </p>
+        <p className="mt-2 text-sm text-neutral-500">Data market belum tersedia.</p>
       </div>
     )
   }
 
   const brief = snapshot.ai_brief ?? null
-  const radar = snapshot.radar ?? {}
-  const topOpportunities = (snapshot.top_opportunities ?? []) as { ticker: string; name: string; aiScore: number; setup: string }[]
+  const radar = snapshot.radar as Record<string, number>
+  const radarStocks = (snapshot.radar_stocks as Record<string, { ticker: string; name: string; aiScore: number; setup: string }[]>) ?? {}
+  const topOpportunities = (snapshot.top_opportunities as { ticker: string; name: string; aiScore: number; setup: string }[]) ?? []
   const breadthInsight = getBreadthInsight(snapshot)
+  const freshness = getFreshness(snapshot.computed_at)
+
+  // Ambil trade plan lengkap untuk 5 Top Opportunities (murah, cuma 5 saham).
+  const enrichedOpportunities = await Promise.all(
+    topOpportunities.map(async (s) => {
+      const candles = await getCandles(supabase, s.ticker)
+      if (candles.length < 20) return { ...s, analysis: null }
+      try {
+        return { ...s, analysis: analyzeStock(candles) }
+      } catch {
+        return { ...s, analysis: null }
+      }
+    })
+  )
 
   return (
     <div className="space-y-6 p-6">
-      <div>
-        <h1 className="text-2xl font-semibold text-neutral-900">Dashboard</h1>
-        <p className="mt-1 text-sm text-neutral-500">
-          Diperbarui {new Date(snapshot.computed_at).toLocaleString('id-ID')}
-        </p>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold text-neutral-900">Dashboard</h1>
+          <p className="mt-1 flex items-center gap-2 text-sm text-neutral-500">
+            <span className={`h-2 w-2 rounded-full ${freshness.dot}`} />
+            <span className={freshness.color}>{freshness.label}</span>
+            <span className="text-neutral-300">•</span>
+            <span>Yahoo Finance (delay ~15-20 menit)</span>
+          </p>
+        </div>
+        <RefreshButton />
       </div>
 
-      {/* IHSG Market Bias */}
       <div className="rounded-xl border border-neutral-200 p-5">
-        <p className="text-xs font-semibold uppercase text-neutral-500">Market Bias - IHSG</p>
+        <p className="text-xs font-semibold uppercase text-neutral-500">Market Bias — IHSG</p>
         <div className="mt-2 flex items-baseline justify-between">
           <p className={`text-xl font-bold ${biasColor[snapshot.market_bias_label]}`}>
             {biasEmoji[snapshot.market_bias_label]} {snapshot.market_bias_label}
           </p>
           <div className="text-right">
-            <p className="text-lg font-semibold text-neutral-900">
-              {Number(snapshot.ihsg_price).toLocaleString('id-ID')}
-            </p>
+            <p className="text-lg font-semibold text-neutral-900">{Number(snapshot.ihsg_price).toLocaleString('id-ID')}</p>
             <p className={snapshot.ihsg_change_percent >= 0 ? 'text-sm text-emerald-600' : 'text-sm text-red-600'}>
               {snapshot.ihsg_change_percent >= 0 ? '+' : ''}
               {Number(snapshot.ihsg_change_percent).toFixed(2)}%
@@ -197,22 +191,16 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      {/* IHSG Market Score */}
       <div className="rounded-xl border border-neutral-200 p-5">
         <p className="text-xs font-semibold uppercase text-neutral-500">IHSG Market Score</p>
-        <p className={`mt-1 text-3xl font-bold ${biasColor[snapshot.market_bias_label]}`}>
-          {snapshot.market_bias_score}/100
-        </p>
+        <p className={`mt-1 text-3xl font-bold ${biasColor[snapshot.market_bias_label]}`}>{snapshot.market_bias_score}/100</p>
         <p className="text-sm text-neutral-500">{snapshot.market_bias_label}</p>
-        <p className="mt-2 text-xs text-neutral-400">
-          Composite score berdasarkan Trend, Momentum, Breadth, Volume, dan Risk.
-        </p>
+        <p className="mt-2 text-xs text-neutral-400">Composite score berdasarkan Trend, Momentum, Breadth, Volume, dan Risk.</p>
       </div>
 
-      {/* Market Breadth */}
       <div className="rounded-xl border border-neutral-200 p-5">
         <div className="flex items-baseline justify-between">
-          <p className="text-xs font-semibold uppercase text-neutral-500">Market Breadth - IDXStocks</p>
+          <p className="text-xs font-semibold uppercase text-neutral-500">Market Breadth — IDX Stocks</p>
           <p className="text-sm font-semibold text-neutral-900">{Number(snapshot.breadth_score)}/100</p>
         </div>
         <p className="mt-1 text-sm font-semibold text-neutral-900">
@@ -246,63 +234,111 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      {/* Top 5 Market Opportunities (Komponen Baru) */}
-      <TopOpportunitiesSection />
+      <div className="rounded-xl border border-neutral-200 p-5">
+        <p className="text-xs font-semibold uppercase text-neutral-500">🔥 Top Opportunities</p>
+        <div className="mt-3 grid grid-cols-1 gap-3 lg:grid-cols-2">
+          {enrichedOpportunities.map((s) => {
+            const a = s.analysis
+            const tp = a?.tradePlan
+            return (
+              <Link
+                key={s.ticker}
+                href={`/stock/${s.ticker}`}
+                className="block rounded-xl border border-neutral-200 p-4 transition hover:border-neutral-400 hover:bg-neutral-50"
+              >
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="font-bold text-neutral-900">{s.ticker}</p>
+                    <p className="truncate text-xs text-neutral-500">{s.name}</p>
+                  </div>
+                  <p className="text-lg font-bold text-neutral-900">{s.aiScore}/100</p>
+                </div>
 
-      {/* Market Radar */}
+                {a && (
+                  <p className="mt-1 text-sm font-semibold text-neutral-900">
+                    Rp{Math.round(a.lastPrice).toLocaleString('id-ID')}
+                    <span className={a.changePercent != null && a.changePercent >= 0 ? 'ml-2 text-xs text-emerald-600' : 'ml-2 text-xs text-red-600'}>
+                      {a.changePercent != null ? `${a.changePercent >= 0 ? '+' : ''}${a.changePercent.toFixed(2)}%` : ''}
+                    </span>
+                  </p>
+                )}
+
+                {a && (
+                  <p className="mt-0.5 text-[11px] text-neutral-400">
+                    RSI {a.rsi != null ? a.rsi.toFixed(1) : '-'} • Vol {a.volumeRatio != null ? `${a.volumeRatio.toFixed(1)}x` : '-'}
+                  </p>
+                )}
+
+                {tp && tp.status === 'VALID' && (
+                  <div className="mt-3 rounded-lg bg-neutral-50 p-3">
+                    <div className="flex items-center justify-between">
+                      <span className={`rounded px-2 py-0.5 text-[10px] font-bold text-white ${actionColor[tp.finalAction]}`}>
+                        {actionLabel[tp.finalAction]}
+                      </span>
+                      <span className="text-[10px] text-neutral-500">
+                        R:R {tp.riskReward != null ? `1:${tp.riskReward.toFixed(1)}` : '-'}
+                      </span>
+                    </div>
+                    <div className="mt-2 grid grid-cols-3 gap-2 text-[11px]">
+                      <div>
+                        <p className="text-neutral-400">Entry</p>
+                        <p className="font-semibold text-neutral-800">Rp{tp.entry?.toLocaleString('id-ID')}</p>
+                      </div>
+                      <div>
+                        <p className="text-neutral-400">Stop Loss</p>
+                        <p className="font-semibold text-red-600">Rp{tp.invalidation?.toLocaleString('id-ID')}</p>
+                      </div>
+                      <div>
+                        <p className="text-neutral-400">Target</p>
+                        <p className="font-semibold text-emerald-600">Rp{tp.target1?.toLocaleString('id-ID')}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {tp && tp.status !== 'VALID' && (
+                  <div className="mt-3">
+                    <span className={`rounded px-2 py-0.5 text-[10px] font-bold text-white ${actionColor[tp.finalAction] ?? 'bg-neutral-500'}`}>
+                      {actionLabel[tp.finalAction] ?? tp.status}
+                    </span>
+                  </div>
+                )}
+
+                <p className="mt-2 text-[11px] uppercase text-neutral-400">{s.setup}</p>
+              </Link>
+            )
+          })}
+          {enrichedOpportunities.length === 0 && <p className="text-sm text-neutral-500">Belum ada saham dengan skor menonjol hari ini.</p>}
+        </div>
+      </div>
+
       <div className="rounded-xl border border-neutral-200 p-5">
         <p className="text-xs font-semibold uppercase text-neutral-500">Market Radar</p>
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-5">
           {radarMeta.map((r) => {
-            const data = getRadarData(radar, topOpportunities, r.key)
-            const count = data.count
-            const stocks = data.stocks
-            const remainingCount = Math.max(count - 3, stocks.length - 3)
-
+            const tickers = (radarStocks[r.key] ?? []).slice(0, 4).map((s) => s.ticker)
             return (
-              <Link key={r.key} href={`/opportunities?type=${r.key}`} className="block rounded-lg bg-neutral-50 p-3 text-center transition hover:bg-neutral-100 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+              <Link
+                key={r.key}
+                href={`/opportunities?type=${r.key}`}
+                className="block rounded-lg bg-neutral-50 p-3 text-center transition hover:bg-neutral-100"
+              >
                 <p className="text-lg">{r.icon}</p>
                 <p className="text-xs text-neutral-500">{r.label}</p>
-                <p className="text-lg font-bold text-neutral-900">{count}</p>
-                <p className="mt-1 text-[11px] leading-tight text-neutral-400">{r.desc(count)}</p>
-
-                {stocks.length > 0 && (
-                  <div className="mt-2.5 flex flex-wrap items-center justify-center gap-1 border-t border-neutral-200/60 pt-2">
-                    {stocks.slice(0, 3).map((stock: any, idx: number) => {
-                      const symbol = typeof stock === 'string' ? stock : (stock.ticker || stock.symbol || stock.code || 'TICKER')
-                      return (
-                        <span
-                          key={idx}
-                          className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
-                            r.key === 'distribution'
-                              ? 'bg-red-100 text-red-700'
-                              : 'bg-emerald-100 text-emerald-800'
-                          }`}
-                        >
-                          {symbol}
-                        </span>
-                      )
-                    })}
-                    {remainingCount > 0 && (
-                      <span className="text-[10px] font-semibold text-neutral-500">
-                        +{remainingCount}
-                      </span>
-                    )}
-                  </div>
-                )}
+                <p className="text-lg font-bold text-neutral-900">{radar[r.key] ?? 0}</p>
+                <p className="mt-1 text-[11px] leading-tight text-neutral-400">
+                  {tickers.length > 0 ? tickers.join(', ') : r.desc(radar[r.key] ?? 0)}
+                </p>
               </Link>
             )
           })}
         </div>
       </div>
 
-      {/* AI Market Brief */}
       <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-5">
         <p className="text-xs font-semibold uppercase text-neutral-500">AI Market Brief</p>
-        <p className="mt-2 whitespace-pre-wrap text-sm text-neutral-800">{brief}</p>
-        <p className="mt-2 text-xs text-neutral-400">
-          AI hanya menjelaskan hasil engine, bukan menentukan arah market.
-        </p>
+        <p className="mt-2 whitespace-pre-wrap text-sm text-neutral-800">{brief ?? 'Belum ada AI brief untuk snapshot ini.'}</p>
+        <p className="mt-2 text-xs text-neutral-400">AI hanya menjelaskan hasil engine, bukan menentukan arah market.</p>
       </div>
     </div>
   )
