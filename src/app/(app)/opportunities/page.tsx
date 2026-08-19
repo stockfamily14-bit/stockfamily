@@ -1,42 +1,43 @@
 ﻿import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 
+// Mencegah Next.js memicu route caching agar perpindahan tab merespons seketika
+export const dynamic = 'force-dynamic'
+
 const radarMeta = [
   {
     key: 'breakoutWatch',
     label: 'Breakout Watch',
-    description: 'Saham mendekati atau menembus resistance.',
+    description: 'Saham mendekati atau menembus resistance dengan konfirmasi volume.',
   },
   {
     key: 'momentum',
     label: 'Momentum',
-    description: 'Saham dengan momentum positif.',
+    description: 'Saham dalam tren naik kuat dengan ekspansi RSI positif.',
   },
   {
     key: 'nearSupport',
     label: 'Near Support',
-    description: 'Saham berada dekat area support.',
+    description: 'Saham berada dekat area demand/support dengan Risk/Reward optimal.',
   },
   {
     key: 'unusualVolume',
     label: 'Unusual Volume',
-    description: 'Saham dengan aktivitas volume tidak biasa.',
+    description: 'Aktivitas akumulasi volume tidak biasa di atas rata-rata 20 hari.',
   },
   {
     key: 'distribution',
     label: 'Distribution',
-    description: 'Saham yang menunjukkan tekanan jual.',
+    description: 'Saham menunjukkan tekanan jual tinggi atau indikasi breakdown.',
   },
 ] as const
 
-type Opportunity = {
+type StockCandidate = {
   ticker: string
   name: string
-  aiScore: number
   setup: string
+  aiScore: number
 }
-
-type RadarMap = Record<string, { count: number; stocks: Opportunity[] }>
 
 export default async function OpportunitiesPage({
   searchParams,
@@ -44,10 +45,11 @@ export default async function OpportunitiesPage({
   searchParams: Promise<{ type?: string }>
 }) {
   const params = await searchParams
-  const selectedType = params.type
+  const selectedType = params.type || 'breakoutWatch'
 
   const supabase = await createClient()
 
+  // Ambil data market snapshot terbaru dari Supabase
   const { data: snapshot } = await supabase
     .from('market_snapshot')
     .select('*')
@@ -55,24 +57,22 @@ export default async function OpportunitiesPage({
     .limit(1)
     .single()
 
-  const topOpportunities =
-    (snapshot?.top_opportunities as Opportunity[] | null) ?? []
+  const radarCounts = snapshot?.radar || {}
+  const radarStocks = snapshot?.radar_stocks || {}
 
-  const radar = (snapshot?.radar as RadarMap | null) ?? {}
-
-  const opportunities = selectedType
-    ? radar[selectedType]?.stocks ?? []
-    : topOpportunities
-
-  const selectedRadar = radarMeta.find((item) => item.key === selectedType)
+  // Tentukan data aktif berdasarkan tab URL
+  const selectedRadar = radarMeta.find((item) => item.key === selectedType) || radarMeta[0]
+  
+  // Ambil list saham asli dari database sesuai tab yang diklik
+  const activeStocks: StockCandidate[] = radarStocks[selectedType] || []
+  const activeCount: number = radarCounts[selectedType] ?? activeStocks.length
 
   return (
-    <div className="space-y-6 p-6">
-
+    <div className="space-y-6 p-6 font-sans">
       <div>
         <Link
           href="/"
-          className="text-sm text-neutral-500 hover:text-neutral-900"
+          className="text-sm text-neutral-500 hover:text-neutral-900 transition"
         >
           ← Kembali ke Dashboard
         </Link>
@@ -82,14 +82,15 @@ export default async function OpportunitiesPage({
         </h1>
 
         <p className="mt-1 text-sm text-neutral-500">
-          Kandidat saham berdasarkan market radar StockFamily.
+          Kandidat saham berprobabilitas tinggi berdasarkan analisis radar StockFamily.
         </p>
       </div>
 
+      {/* Header Cards (Radar Categories) */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-5">
         {radarMeta.map((item) => {
           const active = selectedType === item.key
-          const count = radar[item.key]?.count ?? 0
+          const count = radarCounts[item.key] ?? (radarStocks[item.key]?.length || 0)
 
           return (
             <Link
@@ -97,7 +98,7 @@ export default async function OpportunitiesPage({
               href={`/opportunities?type=${item.key}`}
               className={`rounded-xl border p-4 transition ${
                 active
-                  ? 'border-emerald-500 bg-emerald-50'
+                  ? 'border-emerald-500 bg-emerald-50/60 ring-2 ring-emerald-500/20 shadow-sm'
                   : 'border-neutral-200 bg-white hover:bg-neutral-50'
               }`}
             >
@@ -117,99 +118,114 @@ export default async function OpportunitiesPage({
         })}
       </div>
 
-      <div className="rounded-xl border border-neutral-200 bg-white p-5">
-
-        <div className="flex items-center justify-between">
+      {/* Grid List Saham Kandidat */}
+      <div className="rounded-xl border border-neutral-200 bg-white p-5 shadow-sm">
+        <div className="flex items-center justify-between border-b border-neutral-100 pb-4">
           <div>
-            <p className="text-xs font-semibold uppercase text-neutral-500">
-              {selectedRadar?.label ?? 'Top Opportunities'}
+            <p className="text-xs font-semibold uppercase tracking-wider text-emerald-600">
+              {selectedRadar.label} ({activeCount})
             </p>
 
             <h2 className="mt-1 text-lg font-semibold text-neutral-900">
-              {selectedRadar
-                ? selectedRadar.description
-                : 'Kandidat saham terbaik dari opportunity engine.'}
+              {selectedRadar.description}
             </h2>
           </div>
 
           <Link
-            href="/opportunities"
-            className="text-xs text-neutral-500 hover:text-neutral-900"
+            href="/opportunities?type=breakoutWatch"
+            className="rounded-lg border border-neutral-200 px-3 py-1.5 text-xs font-medium text-neutral-600 hover:bg-neutral-50 transition"
           >
             Reset Filter
           </Link>
         </div>
 
-        {opportunities.length > 0 ? (
-          <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+        {activeStocks.length > 0 ? (
+          <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {activeStocks.map((stock) => {
+              const isDistribution = selectedType === 'distribution'
+              const isHighProb = stock.aiScore >= 80
 
-            {opportunities.map((stock) => (
-              <Link
-                key={stock.ticker}
-                href={`/stock/${stock.ticker}`}
-                className="rounded-xl border border-neutral-200 p-4 transition hover:border-neutral-400 hover:bg-neutral-50"
-              >
-                <div className="flex items-start justify-between">
+              return (
+                <Link
+                  key={stock.ticker}
+                  href={`/stock/${stock.ticker}`}
+                  className="group relative rounded-xl border border-neutral-200 p-4 transition hover:border-emerald-500 hover:shadow-md bg-white"
+                >
+                  {isHighProb && !isDistribution && (
+                    <div className="absolute -top-2.5 right-3 rounded-full bg-emerald-600 px-2.5 py-0.5 text-[10px] font-bold text-white shadow-sm">
+                      🔥 HIGH PROBABILITY
+                    </div>
+                  )}
 
-                  <div>
-                    <p className="text-lg font-bold text-neutral-900">
-                      {stock.ticker}
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="text-lg font-bold text-neutral-900 group-hover:text-emerald-600">
+                        {stock.ticker}
+                      </p>
+
+                      <p className="mt-0.5 truncate text-xs text-neutral-500 max-w-[200px]">
+                        {stock.name}
+                      </p>
+                    </div>
+
+                    <div
+                      className={`rounded-lg px-2.5 py-1 text-xs font-bold ${
+                        isDistribution
+                          ? 'bg-red-100 text-red-700'
+                          : stock.aiScore >= 80
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-neutral-100 text-neutral-700'
+                      }`}
+                    >
+                      {stock.aiScore}/100
+                    </div>
+                  </div>
+
+                  <div className="mt-4 border-t border-neutral-100 pt-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-400">
+                      TECHNICAL SETUP
                     </p>
 
-                    <p className="mt-1 truncate text-xs text-neutral-500">
-                      {stock.name}
+                    <p className="mt-1 text-xs font-semibold text-neutral-800">
+                      {stock.setup || selectedRadar.label.toUpperCase()}
                     </p>
                   </div>
 
-                  <div className="rounded-lg bg-emerald-50 px-2 py-1 text-xs font-bold text-emerald-700">
-                    {stock.aiScore}/100
+                  <div className="mt-3 flex items-center justify-between pt-1 text-xs font-medium text-emerald-600">
+                    <span>Lihat Analysis & Level →</span>
                   </div>
-
-                </div>
-
-                <div className="mt-4">
-                  <p className="text-[11px] uppercase text-neutral-400">
-                    Setup
-                  </p>
-
-                  <p className="mt-1 text-sm font-medium text-neutral-800">
-                    {stock.setup}
-                  </p>
-                </div>
-
-                <p className="mt-4 text-xs font-medium text-emerald-600">
-                  Lihat Stock Detail →
-                </p>
-              </Link>
-            ))}
-
+                </Link>
+              )
+            })}
           </div>
         ) : (
-          <div className="mt-5 rounded-lg bg-neutral-50 p-8 text-center">
+          <div className="mt-5 rounded-lg bg-neutral-50 p-8 text-center border border-dashed border-neutral-200">
             <p className="font-semibold text-neutral-800">
-              Belum ada kandidat.
+              Belum Ada Kandidat Terdeteksi
             </p>
 
             <p className="mt-1 text-xs text-neutral-500">
-              Opportunity engine belum menghasilkan saham untuk radar ini.
+              Market Engine belum menemukan kandidat saham yang memenuhi kriteria untuk kategori ini.
             </p>
           </div>
         )}
-
       </div>
 
+      {/* Engine Status Information */}
       <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-5">
-        <p className="text-xs font-semibold uppercase text-neutral-500">
-          Data Note
-        </p>
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
+            Technical Market Engine Status
+          </p>
+          <span className="inline-flex items-center rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-800">
+            {snapshot?.refresh_status === 'SUCCESS' ? 'Live & Synced' : 'Updating'}
+          </span>
+        </div>
 
-        <p className="mt-2 text-xs leading-5 text-neutral-500">
-          Opportunity kini memakai radar category eksplisit per saham
-          (breakout, momentum, near support, unusual volume, distribution)
-          yang dihitung ulang setiap kali snapshot market dibuat.
+        <p className="mt-2 text-xs leading-5 text-neutral-600">
+          Data ditarik secara terinkronisasi dari Market Engine Supabase (`computed_at`: {snapshot?.computed_at ? new Date(snapshot.computed_at).toLocaleString('id-ID') : '-'}). Seluruh indikator teknikal, skor AI, dan daftar saham bergerak secara alami berdasarkan kondisi riil pasar.
         </p>
       </div>
-
     </div>
   )
 }
