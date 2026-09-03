@@ -4,6 +4,7 @@ config({ path: '.env.local' })
 import YahooFinance from 'yahoo-finance2'
 import { getSupabaseAdmin } from '../src/lib/supabase/admin'
 import { analyzeStock, type Candle } from '../src/lib/analysis/technical'
+import { monitorInsights } from '../src/lib/insight/monitor'
 
 const yahooFinance = new YahooFinance()
 const supabaseAdmin = getSupabaseAdmin()
@@ -482,6 +483,26 @@ function buildMarketInsight(data: {
 }
 
 // ============================================================
+// INSIGHT MONITOR (PUBLISHED → ACTIVE → TARGET/STOP tracking)
+// ============================================================
+
+async function refreshInsights() {
+  console.log('Menjalankan insight monitor...')
+
+  try {
+    const result = await monitorInsights()
+    console.log(
+      `Insight monitor selesai: ${result.updated} diperbarui, ${result.skipped} dilewati (harga basi/tidak match), ${result.errors.length} error dari total ${result.scanned} insight dipindai`
+    )
+    if (result.errors.length > 0) {
+      console.error('Insight monitor errors:', result.errors)
+    }
+  } catch (err) {
+    console.error('Insight monitor gagal total:', err)
+  }
+}
+
+// ============================================================
 // REFRESH POLICY
 // ============================================================
 
@@ -531,6 +552,15 @@ async function run() {
 
   const refresh = await refreshPrices()
   const success = await computeSnapshot(refresh)
+
+  // Insight monitor dijalankan selama harga berhasil di-refresh, terlepas
+  // dari status snapshot (snapshot cuma untuk Dashboard, insight monitor
+  // butuh latest_prices yang sudah diperbarui di refreshPrices() di atas).
+  if (refresh.success) {
+    await refreshInsights()
+  } else {
+    console.warn('Refresh harga tidak penuh sukses â€” insight monitor dilewati untuk menghindari data harga yang tidak lengkap.')
+  }
 
   if (!success) {
     console.error('Refresh selesai tetapi snapshot baru tidak dipublish.')
