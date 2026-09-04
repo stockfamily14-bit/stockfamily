@@ -70,12 +70,117 @@ function getOutcome(status: TradeState['status']) {
   return null
 }
 
+// ============================================================
+// NOTIFICATION QUEUE (Fase A — cuma catat event, belum kirim)
+// ============================================================
+
+type NotificationEventType = 'ACTIVATED' | 'TARGET_1_HIT' | 'TARGET_2_HIT' | 'TARGET_3_HIT' | 'STOPPED'
+
+function buildNotificationCopy(
+  eventType: NotificationEventType,
+  ticker: string,
+  direction: TradeDirection,
+  extra: { price?: number | null; pnlPercent?: number | null } = {},
+): { title: string; message: string } {
+  const dirLabel = direction === 'LONG' ? 'Long' : 'Short'
+
+  switch (eventType) {
+    case 'ACTIVATED':
+      return {
+        title: `${ticker} sekarang ACTIVE`,
+        message: `Signal ${dirLabel} ${ticker} sudah aktif${extra.price != null ? ` di harga ${extra.price}` : ''}.`,
+      }
+    case 'TARGET_1_HIT':
+      return {
+        title: `${ticker} kena Target 1`,
+        message: `Signal ${dirLabel} ${ticker} mencapai Target 1${extra.pnlPercent != null ? ` (${extra.pnlPercent.toFixed(2)}%)` : ''}.`,
+      }
+    case 'TARGET_2_HIT':
+      return {
+        title: `${ticker} kena Target 2`,
+        message: `Signal ${dirLabel} ${ticker} mencapai Target 2${extra.pnlPercent != null ? ` (${extra.pnlPercent.toFixed(2)}%)` : ''}.`,
+      }
+    case 'TARGET_3_HIT':
+      return {
+        title: `${ticker} kena Target 3 (Closed)`,
+        message: `Signal ${dirLabel} ${ticker} mencapai Target 3 dan ditutup${extra.pnlPercent != null ? ` (${extra.pnlPercent.toFixed(2)}%)` : ''}.`,
+      }
+    case 'STOPPED':
+      return {
+        title: `${ticker} kena Stop`,
+        message: `Signal ${dirLabel} ${ticker} tersentuh invalidation/stop level.`,
+      }
+  }
+}
+
+async function queueNotification(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  insightId: string,
+  ticker: string,
+  direction: TradeDirection,
+  eventType: NotificationEventType,
+  extra: { price?: number | null; pnlPercent?: number | null } = {},
+) {
+  const { title, message } = buildNotificationCopy(eventType, ticker, direction, extra)
+
+  const { error } = await supabase.from('notification_queue').insert({
+    insight_id: insightId,
+    ticker,
+    event_type: eventType,
+    title,
+    message,
+  })
+
+  if (error) {
+    // Notifikasi gagal dicatat tidak boleh menggagalkan proses monitor
+    // utama (yang mengurus status trading) — cukup di-log.
+    console.error(`Gagal queue notifikasi ${eventType} untuk ${ticker}:`, error.message)
+  }
+}
+
+/**
+ * Bandingkan status sebelum & sesudah untuk mendeteksi transisi apa saja
+ * yang terjadi, lalu antrikan notifikasi yang sesuai. Dipanggil SEBELUM
+ * status baru ditulis ke DB, supaya "previousStatus" akurat.
+ */
+async function queueTransitionNotifications(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  row: InsightRow,
+  state: TradeState,
+) {
+  const previousStatus = row.status
+  const newStatus = state.status
+
+  if (previousStatus === newStatus) return
+
+  const extra = { price: state.currentPrice, pnlPercent: state.pnlPercent }
+
+  if (previousStatus === 'PUBLISHED' && newStatus === 'ACTIVE') {
+    await queueNotification(supabase, row.id, row.ticker, row.direction, 'ACTIVATED', extra)
+  }
+  if (newStatus === 'TARGET_1_HIT' && previousStatus !== 'TARGET_1_HIT') {
+    await queueNotification(supabase, row.id, row.ticker, row.direction, 'TARGET_1_HIT', extra)
+  }
+  if (newStatus === 'TARGET_2_HIT' && previousStatus !== 'TARGET_2_HIT') {
+    await queueNotification(supabase, row.id, row.ticker, row.direction, 'TARGET_2_HIT', extra)
+  }
+  if (newStatus === 'TARGET_3_HIT' && previousStatus !== 'TARGET_3_HIT') {
+    await queueNotification(supabase, row.id, row.ticker, row.direction, 'TARGET_3_HIT', extra)
+  }
+  if (newStatus === 'STOPPED' && previousStatus !== 'STOPPED') {
+    await queueNotification(supabase, row.id, row.ticker, row.direction, 'STOPPED', extra)
+  }
+}
+
 async function persistState(
   supabase: ReturnType<typeof getSupabaseAdmin>,
   row: InsightRow,
   state: TradeState,
   priceRecordedAt: string,
 ) {
+  // Antrikan notifikasi dulu (baca previous status sebelum ke-overwrite).
+  await queueTransitionNotifications(supabase, row, state)
+
   const payload: Record<string, unknown> = {
     current_price: state.currentPrice,
     last_price_at: priceRecordedAt,
