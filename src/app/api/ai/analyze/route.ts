@@ -241,7 +241,7 @@ export async function POST(req: Request) {
       }
     };
 
-    const responseData = stockResponse[mode] || stockResponse['business'];
+    const responseData = (stockResponse as Record<string, any>)[mode] || stockResponse['business'];
 
     return NextResponse.json({
       success: true,
