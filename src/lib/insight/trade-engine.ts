@@ -54,6 +54,9 @@ export type TradeEngineInput = {
   invalidation: number | null
   trigger: number | null
   previousState?: TradeState | null
+  // Dipakai oleh rekonsiliasi harian untuk "berpura-pura" mengecek di
+  // tanggal lampau -- kalau tidak diisi, pakai waktu sekarang (real-time).
+  nowOverride?: string
 }
 
 const DEFAULT_ENTRY_WEIGHTS = {
@@ -66,7 +69,7 @@ function isFiniteNumber(value: number | null | undefined): value is number {
   return value !== null && value !== undefined && Number.isFinite(value)
 }
 
-function now() {
+function defaultNow() {
   return new Date().toISOString()
 }
 
@@ -126,9 +129,6 @@ function entryWasHit(
 }
 
 // Trigger = konfirmasi breakout, arahnya KEBALIKAN dari entry.
-// LONG: entry menangkap retrace turun (currentPrice <= entry),
-//       trigger menangkap breakout naik (currentPrice >= trigger).
-// SHORT: entry menangkap retrace naik, trigger menangkap breakdown turun.
 function triggerWasHit(
   direction: TradeDirection,
   currentPrice: number,
@@ -228,6 +228,8 @@ export function runTradeEngine(input: TradeEngineInput): TradeState {
     throw new Error('Entry 3 weight must be stored as a fraction, e.g. 0.30')
   }
 
+  const ts = () => input.nowOverride ?? defaultNow()
+
   const state = cloneState(input)
   state.currentPrice = input.currentPrice
 
@@ -256,7 +258,7 @@ export function runTradeEngine(input: TradeEngineInput): TradeState {
 
     if (entryWasHit(input.direction, state.currentPrice, entry.price)) {
       entry.filled = true
-      const timestamp = now()
+      const timestamp = ts()
 
       if (index === 0) state.entry1FilledAt = timestamp
       if (index === 1) state.entry2FilledAt = timestamp
@@ -272,8 +274,12 @@ export function runTradeEngine(input: TradeEngineInput): TradeState {
     triggerWasHit(input.direction, state.currentPrice, input.trigger)
   ) {
     state.triggerHit = true
-    state.triggerHitAt = now()
+    state.triggerHitAt = ts()
   }
+
+  // Simpan status "target 1 sudah pernah hit" SEBELUM target di-cek ulang
+  // tick ini -- dipakai untuk SL+ di bawah.
+  const target1HitBefore = state.targets[0].hit
 
   state.filledWeight = state.entries
     .filter((entry) => entry.filled)
@@ -283,7 +289,6 @@ export function runTradeEngine(input: TradeEngineInput): TradeState {
 
   const hasEntryBasis = state.filledWeight > 0 && state.averageEntry !== null
 
-  // Jalur aktivasi: entry filled ATAU trigger tersentuh.
   if (!hasEntryBasis && !state.triggerHit) {
     state.status = 'PUBLISHED'
     state.pnlPoints = null
@@ -294,37 +299,48 @@ export function runTradeEngine(input: TradeEngineInput): TradeState {
   if (state.status === 'PUBLISHED') {
     state.status = 'ACTIVE'
     if (!state.activatedAt) {
-      state.activatedAt = now()
+      state.activatedAt = ts()
     }
   }
 
-  // PnL hanya bisa dihitung kalau sudah ada entry yang benar-benar filled.
-  // Trigger-only (belum ada entry filled) tetap ACTIVE tapi PnL null,
-  // karena belum ada average entry price sebagai basis hitung.
   const pnl = hasEntryBasis
     ? calculatePnl(input.direction, state.currentPrice, state.averageEntry)
     : { pnlPoints: null, pnlPercent: null }
   state.pnlPoints = pnl.pnlPoints
   state.pnlPercent = pnl.pnlPercent
 
-  // Invalidation/target hanya relevan kalau sudah ada entry basis untuk pnl.
   if (!hasEntryBasis) {
     return state
   }
 
+  // SL+ (breakeven lock): begitu Target 1 pernah tercapai, invalidation
+  // tidak boleh lebih longgar dari average_entry.
+  let effectiveInvalidation = input.invalidation
+
   if (
-    isFiniteNumber(input.invalidation) &&
-    input.invalidation > 0 &&
+    target1HitBefore &&
+    isFiniteNumber(state.averageEntry) &&
+    isFiniteNumber(input.invalidation)
+  ) {
+    effectiveInvalidation =
+      input.direction === 'LONG'
+        ? Math.max(input.invalidation, state.averageEntry)
+        : Math.min(input.invalidation, state.averageEntry)
+  }
+
+  if (
+    isFiniteNumber(effectiveInvalidation) &&
+    effectiveInvalidation > 0 &&
     invalidationWasHit(
       input.direction,
       state.currentPrice,
-      input.invalidation,
+      effectiveInvalidation,
     )
   ) {
     state.status = 'STOPPED'
 
     if (!state.stoppedAt) {
-      state.stoppedAt = now()
+      state.stoppedAt = ts()
     }
 
     return state
@@ -334,18 +350,10 @@ export function runTradeEngine(input: TradeEngineInput): TradeState {
     !state.targets[0].hit &&
     Number.isFinite(state.targets[0].price) &&
     state.targets[0].price > 0 &&
-    targetWasHit(
-      input.direction,
-      state.currentPrice,
-      state.targets[0].price,
-    )
+    targetWasHit(input.direction, state.currentPrice, state.targets[0].price)
   ) {
     state.targets[0].hit = true
-
-    if (!state.target1HitAt) {
-      state.target1HitAt = now()
-    }
-
+    if (!state.target1HitAt) state.target1HitAt = ts()
     state.status = 'TARGET_1_HIT'
   }
 
@@ -353,18 +361,10 @@ export function runTradeEngine(input: TradeEngineInput): TradeState {
     !state.targets[1].hit &&
     Number.isFinite(state.targets[1].price) &&
     state.targets[1].price > 0 &&
-    targetWasHit(
-      input.direction,
-      state.currentPrice,
-      state.targets[1].price,
-    )
+    targetWasHit(input.direction, state.currentPrice, state.targets[1].price)
   ) {
     state.targets[1].hit = true
-
-    if (!state.target2HitAt) {
-      state.target2HitAt = now()
-    }
-
+    if (!state.target2HitAt) state.target2HitAt = ts()
     state.status = 'TARGET_2_HIT'
   }
 
@@ -372,18 +372,10 @@ export function runTradeEngine(input: TradeEngineInput): TradeState {
     !state.targets[2].hit &&
     Number.isFinite(state.targets[2].price) &&
     state.targets[2].price > 0 &&
-    targetWasHit(
-      input.direction,
-      state.currentPrice,
-      state.targets[2].price,
-    )
+    targetWasHit(input.direction, state.currentPrice, state.targets[2].price)
   ) {
     state.targets[2].hit = true
-
-    if (!state.target3HitAt) {
-      state.target3HitAt = now()
-    }
-
+    if (!state.target3HitAt) state.target3HitAt = ts()
     state.status = 'TARGET_3_HIT'
   }
 
