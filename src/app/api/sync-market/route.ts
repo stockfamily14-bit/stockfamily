@@ -1,13 +1,21 @@
 ﻿import { NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
+export const dynamic = 'force-dynamic'
+
+function getSupabaseClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+  if (!supabaseUrl || !supabaseKey) {
+    throw new Error('Supabase environment variables are not configured')
+  }
+  return createClient(supabaseUrl, supabaseKey)
+}
 
 export async function GET() {
   try {
+    const supabase = getSupabaseClient()
+
     // 1. Tarik Data Live IHSG (^JKSE) dari Live Feed / Yahoo Finance API
     const resIHSG = await fetch('https://query1.finance.yahoo.com/v8/finance/chart/%5EJKSE?interval=1m', {
       headers: { 'User-Agent': 'Mozilla/5.0' },
