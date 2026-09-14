@@ -407,45 +407,26 @@ export default async function InsightPage({
 ================================================================ */
 
 function calculatePerformance(signals: any[]) {
-  const wins = signals.filter((signal) => {
-    if (
-      signal.status === 'TARGET_1_HIT' ||
-      signal.status === 'TARGET_2_HIT' ||
-      signal.status === 'TARGET_3_HIT'
-    ) {
-      return true
-    }
+  // Klasifikasi win/loss berbasis OUTCOME (sudah dikunci final di backend
+  // saat kejadian pertama terjadi), BUKAN status mentah -- karena status
+  // bisa jadi STOPPED sekalipun target sudah tercapai lebih dulu, dan itu
+  // tetap harus terhitung WIN, bukan loss.
+  const wins = signals.filter(
+    (signal) =>
+      signal.outcome === 'TARGET_1' ||
+      signal.outcome === 'TARGET_2' ||
+      signal.outcome === 'TARGET_3',
+  )
 
-    if (signal.status === 'CLOSED') {
-      return (
-        signal.outcome === 'TARGET_1' ||
-        signal.outcome === 'TARGET_2' ||
-        signal.outcome === 'TARGET_3'
-      )
-    }
-
-    return false
-  })
-
-  const losses = signals.filter((signal) => {
-    if (signal.status === 'STOPPED') {
-      return true
-    }
-
-    if (signal.status === 'CLOSED') {
-      return (
-        signal.outcome === 'STOP' ||
-        signal.outcome === 'STOPPED'
-      )
-    }
-
-    return false
-  })
+  const losses = signals.filter(
+    (signal) => signal.outcome === 'STOP',
+  )
 
   const breakeven = signals.filter((signal) => {
     return (
       signal.outcome === 'BREAKEVEN' ||
-      signal.outcome === 'BREAK_EVEN'
+      signal.outcome === 'BREAK_EVEN' ||
+      signal.outcome === 'MANUAL_CLOSE'
     )
   })
 
@@ -484,11 +465,13 @@ function calculatePerformance(signals: any[]) {
       }
 
       return (
-        signal.status === 'TARGET_1_HIT' ||
-        signal.status === 'TARGET_2_HIT' ||
-        signal.status === 'TARGET_3_HIT' ||
-        signal.status === 'STOPPED' ||
-        signal.status === 'CLOSED'
+        signal.outcome === 'TARGET_1' ||
+        signal.outcome === 'TARGET_2' ||
+        signal.outcome === 'TARGET_3' ||
+        signal.outcome === 'STOP' ||
+        signal.outcome === 'BREAKEVEN' ||
+        signal.outcome === 'BREAK_EVEN' ||
+        signal.outcome === 'MANUAL_CLOSE'
       )
     })
     .map((signal) => Number(signal.result_percent))

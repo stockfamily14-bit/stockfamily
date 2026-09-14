@@ -103,15 +103,27 @@ async function queueTransitionNotifications(
   }
 }
 
+function getOutcome(status: TradeState['status']) {
+  if (status === 'TARGET_1_HIT') return 'TARGET_1'
+  if (status === 'TARGET_2_HIT') return 'TARGET_2'
+  if (status === 'TARGET_3_HIT') return 'TARGET_3'
+  return null
+}
+
 /**
- * Tentukan outcome final untuk status STOPPED berdasarkan hasil aktual --
- * bukan diasumsikan selalu rugi. Kalau SL+ (breakeven lock) sudah aktif
- * (karena T1 pernah kena), hasil di titik stop biasanya mendekati 0% atau
- * malah positif -- itu dikategorikan BREAKEVEN, bukan STOP (loss).
+ * Hasil "kalau exit persis di harga target X" -- dipakai untuk mengunci
+ * result_percent di momen target pertama kali tercapai, bukan pakai harga
+ * sesaat yang bisa overshoot (terutama dari rekonsiliasi OHLC harian yang
+ * memakai High/Low, bukan tick-by-tick).
  */
-function resolveStoppedOutcome(pnlPercent: number | null): 'STOP' | 'BREAKEVEN' {
-  if (pnlPercent !== null && pnlPercent >= 0) return 'BREAKEVEN'
-  return 'STOP'
+function calcResultAtPrice(
+  direction: TradeDirection,
+  price: number | null,
+  averageEntry: number | null,
+): number | null {
+  if (price === null || averageEntry === null || averageEntry === 0) return null
+  const diff = direction === 'LONG' ? price - averageEntry : averageEntry - price
+  return (diff / averageEntry) * 100
 }
 
 export async function persistState(
@@ -148,36 +160,63 @@ export async function persistState(
     updated_at: new Date().toISOString(),
   }
 
+  // Transisi BARU saja (bukan tick berulang di status yang sama) yang
+  // boleh mengunci outcome/result -- supaya nilainya benar-benar "beku"
+  // di momen kejadian pertama, tidak terus berubah selama status yang
+  // sama masih dipantau ulang.
+  const isNewTransition = row.status !== state.status
+
   if (state.status === 'PUBLISHED') {
     payload.status = 'PUBLISHED'
-    payload.outcome = null
+    if (isNewTransition) payload.outcome = null
   } else if (state.status === 'ACTIVE') {
     payload.status = 'ACTIVE'
-    payload.outcome = null
+    if (isNewTransition) payload.outcome = null
   } else if (state.status === 'TARGET_1_HIT' || state.status === 'TARGET_2_HIT') {
     payload.status = state.status
-    payload.outcome = null
-    payload.result_percent = null
+    if (isNewTransition) {
+      // KUNCI outcome & result PERSIS di momen target ini pertama kali
+      // tercapai -- dihitung dari harga target itu sendiri, bukan harga
+      // sesaat yang mungkin overshoot.
+      const targetIndex = state.status === 'TARGET_1_HIT' ? 0 : 1
+      payload.outcome = getOutcome(state.status)
+      payload.result_percent = calcResultAtPrice(
+        row.direction,
+        state.targets[targetIndex]?.price ?? null,
+        state.averageEntry,
+      )
+    }
+    // Kalau bukan transisi baru (status belum berubah dari tick
+    // sebelumnya), JANGAN sentuh outcome/result_percent -- biarkan
+    // tetap sesuai nilai yang sudah terkunci.
   } else if (state.status === 'STOPPED') {
-    const outcome = resolveStoppedOutcome(state.pnlPercent)
+    const alreadyHitTargetBefore = row.status === 'TARGET_1_HIT' || row.status === 'TARGET_2_HIT'
     payload.status = 'STOPPED'
-    payload.outcome = outcome
     payload.stopped_at = state.stoppedAt
-    payload.result_percent = state.pnlPercent
+
+    if (!alreadyHitTargetBefore) {
+      // SL murni kena SEBELUM target manapun tercapai -- ini genuine loss.
+      payload.outcome = 'STOP'
+      payload.result_percent = state.pnlPercent
+    }
+    // Kalau target sudah pernah tercapai sebelumnya, JANGAN timpa
+    // outcome/result_percent -- biarkan tetap tercatat sebagai target
+    // yang sudah dikunci (win), meskipun posisi akhirnya kena stop.
   }
 
   if (state.status === 'TARGET_3_HIT') {
     const target3At = state.target3HitAt ?? new Date().toISOString()
+    const lockedResult = calcResultAtPrice(row.direction, state.targets[2]?.price ?? null, state.averageEntry)
     const { error: target3Error } = await supabase
       .from('insight_signals')
-      .update({ ...payload, status: 'TARGET_3_HIT', outcome: 'TARGET_3', target_3_hit: true, target_3_hit_at: target3At, result_percent: state.pnlPercent })
+      .update({ ...payload, status: 'TARGET_3_HIT', outcome: 'TARGET_3', target_3_hit: true, target_3_hit_at: target3At, result_percent: lockedResult })
       .eq('id', row.id)
       .eq('status', row.status)
     if (target3Error) throw new Error(`Failed to persist TARGET_3_HIT for ${row.ticker}: ${target3Error.message}`)
 
     const { error: closeError } = await supabase
       .from('insight_signals')
-      .update({ status: 'CLOSED', outcome: 'TARGET_3', closed_at: new Date().toISOString(), result_percent: state.pnlPercent, updated_at: new Date().toISOString() })
+      .update({ status: 'CLOSED', outcome: 'TARGET_3', closed_at: new Date().toISOString(), result_percent: lockedResult, updated_at: new Date().toISOString() })
       .eq('id', row.id)
       .eq('status', 'TARGET_3_HIT')
     if (closeError) throw new Error(`Failed to close ${row.ticker} after TARGET_3: ${closeError.message}`)
