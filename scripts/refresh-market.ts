@@ -5,6 +5,7 @@ import YahooFinance from 'yahoo-finance2'
 import { getSupabaseAdmin } from '../src/lib/supabase/admin'
 import { analyzeStock, type Candle } from '../src/lib/analysis/technical'
 import { monitorInsights } from '../src/lib/insight/monitor'
+import { sendPendingTelegramNotifications } from '../src/lib/notifications/telegram'
 
 const yahooFinance = new YahooFinance()
 const supabaseAdmin = getSupabaseAdmin()
@@ -500,6 +501,18 @@ async function refreshInsights() {
   } catch (err) {
     console.error('Insight monitor gagal total:', err)
   }
+
+  console.log('Mengirim notifikasi Telegram...')
+  try {
+    const telegramResult = await sendPendingTelegramNotifications()
+    if (telegramResult.skippedNoSubscribers) {
+      console.log('Tidak ada subscriber Telegram aktif, lewati pengiriman.')
+    } else {
+      console.log(`Telegram selesai: ${telegramResult.sent} terkirim, ${telegramResult.failed} gagal.`)
+    }
+  } catch (err) {
+    console.error('Pengiriman Telegram gagal total:', err)
+  }
 }
 
 // ============================================================
@@ -553,13 +566,14 @@ async function run() {
   const refresh = await refreshPrices()
   const success = await computeSnapshot(refresh)
 
-  // Insight monitor dijalankan selama harga berhasil di-refresh, terlepas
-  // dari status snapshot (snapshot cuma untuk Dashboard, insight monitor
-  // butuh latest_prices yang sudah diperbarui di refreshPrices() di atas).
+  // Insight monitor + notifikasi Telegram dijalankan selama harga berhasil
+  // di-refresh, terlepas dari status snapshot (snapshot cuma untuk
+  // Dashboard, insight monitor butuh latest_prices yang sudah diperbarui
+  // di refreshPrices() di atas).
   if (refresh.success) {
     await refreshInsights()
   } else {
-    console.warn('Refresh harga tidak penuh sukses â€” insight monitor dilewati untuk menghindari data harga yang tidak lengkap.')
+    console.warn('Refresh harga tidak penuh sukses — insight monitor & notifikasi dilewati untuk menghindari data harga yang tidak lengkap.')
   }
 
   if (!success) {

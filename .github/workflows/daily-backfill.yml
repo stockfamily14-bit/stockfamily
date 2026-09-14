@@ -32,6 +32,9 @@ jobs:
       - name: Backfill historical OHLCV
         run: npx tsx scripts/backfill-all.ts
 
+      - name: Reconcile insight signals (catch missed intraday touches)
+        run: npx tsx scripts/reconcile-insights.ts
+
       - name: Backfill IHSG
         run: npx tsx scripts/backfill-ihsg.ts
 

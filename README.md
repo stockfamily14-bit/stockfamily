@@ -1,36 +1,39 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# StockFamily — Yahoo Candlestick / Daily Summary Separation
 
-## Getting Started
+Patch ini memisahkan sumber data Ticker Detail secara tegas:
 
-First, run the development server:
+## Yahoo Finance — chart saja
+`src/app/api/stock-ohlcv/route.ts` sekarang mengambil daily OHLCV langsung dari Yahoo Finance untuk `{TICKER}.JK`.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+Field yang dikembalikan:
+- date
+- open
+- high
+- low
+- close
+- volume
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+`SFAlphaChart` menggunakan feed ini untuk:
+- candlestick
+- SMA20
+- SMA50
+- volume histogram
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Tidak ada fallback candlestick ke `daily_market_summary`. Jika Yahoo gagal, chart tidak diam-diam berganti sumber.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## daily_market_summary — StockFamily intelligence
+Tetap digunakan untuk:
+- Foreign Buy / Sell / Foreign Net
+- Bid / Offer
+- Participation / Flow
+- SCRET dan State/Regime
+- SCRET insights
+- EOD header metrics
 
-## Learn More
+Technical Analysis dan Trade Plan juga tetap dihitung dari OHLCV `daily_market_summary`, sehingga kalkulasi Trade Plan yang sudah cocok tidak berubah akibat pergantian sumber chart.
 
-To learn more about Next.js, take a look at the following resources:
+## Catatan
+Yahoo endpoint yang dipakai adalah chart endpoint:
+`https://query1.finance.yahoo.com/v8/finance/chart/{TICKER}.JK`
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Route mengembalikan maksimal 200 candle terbaru dan diberi `Cache-Control: no-store`.

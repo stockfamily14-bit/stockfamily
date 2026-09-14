@@ -12,55 +12,112 @@ function sleep(ms: number) {
 }
 
 async function run() {
-  const { data: stocks } = await supabaseAdmin.from('stocks').select('ticker')
+  const { data: stocks, error: stocksError } =
+    await supabaseAdmin
+      .from('stocks')
+      .select('ticker')
+
+  if (stocksError) {
+    throw stocksError
+  }
+
   const tickers = (stocks ?? []).map((s) => s.ticker)
 
   console.log(`Total saham: ${tickers.length}`)
 
   const period1 = new Date()
-  period1.setDate(period1.getDate() - 90)
+  period1.setDate(period1.getDate() - 180)
 
   let success = 0
   let failed = 0
+  let totalCandles = 0
 
   for (let i = 0; i < tickers.length; i++) {
     const ticker = tickers[i]
 
     try {
-      const result = await yahooFinance.chart(`${ticker}.JK`, {
-        period1,
-        interval: '1d',
-      })
+      console.log(
+        `[${i + 1}/${tickers.length}] ${ticker}...`
+      )
+
+      const result = await yahooFinance.chart(
+        `${ticker}.JK`,
+        {
+          period1,
+          interval: '1d',
+        }
+      )
 
       const rows = result.quotes
         .filter((q) => q.close != null)
         .map((q) => ({
           ticker,
           date: q.date.toISOString().split('T')[0],
-          open: q.open,
-          high: q.high,
-          low: q.low,
-          close: q.close,
-          volume: q.volume,
+          open: q.open ?? null,
+          high: q.high ?? null,
+          low: q.low ?? null,
+          close: q.close ?? null,
+          volume: q.volume ?? null,
         }))
 
-      if (rows.length) {
-        await supabaseAdmin.from('stock_ohlcv').upsert(rows, { onConflict: 'ticker,date' })
+      console.log(`  Yahoo candles: ${rows.length}`)
+
+      if (rows.length === 0) {
+        failed++
+        console.log('  SKIP: tidak ada candle')
+        continue
+      }
+
+      const { error: upsertError } =
+        await supabaseAdmin
+          .from('stock_ohlcv')
+          .upsert(rows, {
+            onConflict: 'ticker,date',
+          })
+
+      if (upsertError) {
+        failed++
+
+        console.log(
+          '  SUPABASE ERROR:',
+          upsertError.message
+        )
+
+        continue
       }
 
       success++
-    } catch {
-      failed++
-    }
+      totalCandles += rows.length
 
-    if ((i + 1) % 50 === 0) {
-      console.log(`Progress: ${i + 1}/${tickers.length} (sukses: ${success}, gagal: ${failed})`)
+      console.log(
+        `  OK: ${rows.length} candle disimpan`
+      )
+    } catch (error) {
+      failed++
+
+      console.log(
+        '  ERROR:',
+        error instanceof Error
+          ? error.message
+          : error
+      )
     }
 
     await sleep(300)
   }
 
-  console.log(`Selesai! Sukses: ${success}, Gagal: ${failed}`)
+  console.log('')
+  console.log('================================')
+  console.log('BACKFILL SELESAI')
+  console.log('================================')
+  console.log(`Ticker:       ${tickers.length}`)
+  console.log(`Sukses:       ${success}`)
+  console.log(`Gagal/skip:   ${failed}`)
+  console.log(`Total candle: ${totalCandles}`)
 }
 
-run()
+run().catch((error) => {
+  console.error('FATAL ERROR:')
+  console.error(error)
+  process.exit(1)
+})

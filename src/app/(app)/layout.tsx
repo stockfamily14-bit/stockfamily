@@ -1,38 +1,44 @@
-import Link from 'next/link'
+import UserProfileDropdown from '@/components/layout/UserProfileDropdown'
 import type { ReactNode } from 'react'
+import AppSidebar from '@/components/layout/AppSidebar'
+import { isAdmin } from '@/lib/auth/admin'
 
-const navItems = [
-  { href: '/', label: 'Dashboard' },
-  { href: '/ai-analyst', label: 'AI Analyst' },
-  { href: '/watchlist', label: 'Watchlist' },
-  { href: '/screener', label: 'Screener' },
-  { href: '/journal', label: 'Journal' },
-  { href: '/portfolio', label: 'Portfolio' },
-  { href: '/academy', label: 'Academy' },
-  { href: '/insight', label: 'Insight' },
-]
+export default async function AppLayout({
+  children,
+}: {
+  children: ReactNode
+}) {
+  const admin = await isAdmin()
 
-export default function AppLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="flex min-h-screen">
-      <aside className="w-56 shrink-0 border-r border-neutral-200 bg-neutral-50 p-4">
-        <div className="mb-6 px-2">
-          <h2 className="text-lg font-semibold text-neutral-900">StockFamily</h2>
-          <p className="text-xs text-neutral-400">Trade Smarter, Together.</p>
-        </div>
-        <nav className="space-y-1">
-          {navItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className="block rounded-lg px-3 py-2 text-sm text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900"
-            >
-              {item.label}
-            </Link>
-          ))}
-        </nav>
-      </aside>
-      <main className="flex-1 bg-white">{children}</main>
+    <div className="min-h-screen bg-[var(--background)] text-[var(--foreground)]">
+      <div className="flex min-h-screen">
+
+        <AppSidebar isAdmin={admin} />
+
+        <main className="min-w-0 flex-1 bg-[var(--background)]">
+          <header className="sticky top-0 z-20 flex h-[68px] items-center justify-between border-b border-[var(--border)] bg-[var(--background-secondary)]/95 px-7 backdrop-blur">
+            <div>
+              <p className="text-xs font-medium text-[var(--muted)]">
+                StockFamily Workspace
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="hidden rounded-lg border border-[var(--border)] bg-[var(--surface)] px-4 py-2 text-xs text-[var(--secondary)] md:block">
+                Indonesian Stock Market
+              </div>
+
+              <UserProfileDropdown />
+            </div>
+          </header>
+
+          <div className="mx-auto w-full max-w-[1800px]">
+            {children}
+          </div>
+        </main>
+
+      </div>
     </div>
   )
 }
