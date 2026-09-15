@@ -8,37 +8,42 @@ const radarMeta = [
   {
     key: 'breakoutWatch',
     label: 'Breakout Watch',
-    icon: '↗',
+    icon: '',
     description:
       'Saham mendekati atau menembus resistance dengan konfirmasi volume.',
+    accent: 'emerald',
   },
   {
     key: 'momentum',
     label: 'Momentum',
-    icon: '▲',
+    icon: '',
     description:
       'Saham dalam tren naik kuat dengan ekspansi RSI positif.',
+    accent: 'cyan',
   },
   {
     key: 'nearSupport',
     label: 'Near Support',
-    icon: '◎',
+    icon: '',
     description:
       'Saham berada dekat area demand/support dengan Risk/Reward optimal.',
+    accent: 'amber',
   },
   {
     key: 'unusualVolume',
     label: 'Unusual Volume',
-    icon: '▥',
+    icon: '',
     description:
       'Aktivitas akumulasi volume tidak biasa di atas rata-rata 20 hari.',
+    accent: 'violet',
   },
   {
     key: 'distribution',
     label: 'Distribution',
-    icon: '!',
+    icon: '!',
     description:
       'Saham menunjukkan tekanan jual tinggi atau indikasi breakdown.',
+    accent: 'red',
   },
 ] as const
 
@@ -146,33 +151,34 @@ export default async function OpportunitiesPage({
   const activeCount = selectedEntry.count ?? activeStocks.length
 
   return (
-    <div className="min-h-screen bg-[#08090a] px-4 py-5 font-sans text-neutral-300 sm:px-6 sm:py-6 lg:px-7">
+    <div className="min-h-screen bg-[#07090e] px-4 py-6 font-sans text-slate-300 sm:px-6 md:px-8">
       {/* BREADCRUMB & HEADER */}
-      <div>
+      <div className="mb-6">
         <Link
           href="/dashboard"
-          className="inline-flex items-center gap-1 font-mono text-[10px] font-medium text-neutral-600 transition-colors hover:text-emerald-400"
+          className="inline-flex items-center gap-1.5 font-mono text-xs font-semibold text-slate-500 transition-colors hover:text-cyan-400"
         >
-          ← Kembali ke Dashboard
+           Kembali ke Dashboard
         </Link>
 
-        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="mt-3 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-2xl font-black tracking-[-0.03em] text-white sm:text-[30px]">
+            <h1 className="text-2xl font-black tracking-tight text-white sm:text-3xl">
               Market Opportunities
             </h1>
-            <p className="mt-1.5 max-w-2xl text-[11px] leading-relaxed text-neutral-500">
+            <p className="mt-1 text-xs text-slate-400">
               Kandidat saham berdasarkan analisis radar indikator teknikal StockFamily.
             </p>
           </div>
-          <span className="hidden items-center gap-2 rounded-full border border-emerald-500/20 bg-emerald-500/[0.06] px-3 py-1.5 font-mono text-[9px] font-bold uppercase tracking-[0.12em] text-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.05)] sm:inline-flex">
-            ● Live Market Radar
+          <span className="inline-flex w-fit items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-1.5 font-mono text-[10px] font-bold uppercase tracking-widest text-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.1)]">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            Live Market Radar
           </span>
         </div>
       </div>
 
-      {/* RADAR TABS (DARK MODE TERMINAL STYLE) */}
-      <div className="mt-5 grid grid-cols-2 gap-2.5 sm:grid-cols-5 sm:gap-3">
+      {/* RADAR TABS / CARDS */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {radarMeta.map((item) => {
           const active = selectedType === item.key
           const count = radar[item.key]?.count ?? 0
@@ -181,32 +187,35 @@ export default async function OpportunitiesPage({
             <Link
               key={item.key}
               href={`/opportunities?type=${item.key}`}
-              className={`group relative flex min-h-[132px] flex-col justify-between overflow-hidden rounded-xl border p-4 transition-all duration-200 ${
+              scroll={false}
+              className={`group relative flex min-h-[135px] flex-col justify-between overflow-hidden rounded-2xl border p-4 transition-all duration-200 cursor-pointer ${
                 active
-                  ? 'bg-[#12161f] border-emerald-500/80 shadow-[0_12px_32px_rgba(16,185,129,0.10)] ring-1 ring-emerald-500/30'
-                  : 'bg-[#101216] border-white/[0.06] hover:-translate-y-0.5 hover:border-white/[0.14] hover:bg-[#15171c] hover:shadow-[0_10px_28px_rgba(0,0,0,0.22)]'
+                  ? 'bg-[#0f172a] border-cyan-400/80 shadow-[0_0_25px_rgba(34,211,238,0.15)] ring-1 ring-cyan-400/50'
+                  : 'bg-[#0b101d] border-white/5 hover:border-white/15 hover:bg-[#0f1626]'
               }`}
             >
               <div>
                 <div className="flex items-center justify-between">
                   <span
-                    className={`text-[10px] font-bold uppercase tracking-[0.09em] ${
-                      active ? 'text-emerald-400' : 'text-neutral-500'
+                    className={`text-[10px] font-black uppercase tracking-wider ${
+                      active ? 'text-cyan-400' : 'text-slate-400'
                     }`}
                   >
                     {item.label}
                   </span>
-                  <span className="text-base opacity-80 transition-transform group-hover:scale-110">{item.icon}</span>
+                  <span className="text-sm font-bold text-slate-400 opacity-80 transition-transform group-hover:scale-125">
+                    {item.icon}
+                  </span>
                 </div>
                 <p
-                  className={`mt-3 text-[25px] font-black font-mono tracking-tight ${
-                    active ? 'text-white' : 'text-neutral-200'
+                  className={`mt-2 text-2xl font-black font-mono tracking-tight ${
+                    active ? 'text-white' : 'text-slate-200'
                   }`}
                 >
                   {count}
                 </p>
               </div>
-              <p className="mt-3 line-clamp-2 text-[9px] leading-relaxed text-neutral-600">
+              <p className="mt-2 line-clamp-2 text-[10px] leading-relaxed text-slate-500">
                 {item.description}
               </p>
             </Link>
@@ -214,31 +223,33 @@ export default async function OpportunitiesPage({
         })}
       </div>
 
+      {/* CLIENT TABLE */}
       <OpportunitiesClient
         stocks={activeStocks}
         selectedRadar={selectedRadar}
         selectedType={selectedType}
         activeCount={activeCount}
       />
+
       {/* SYSTEM STATUS FOOTER */}
-      <div className="mt-6 flex flex-col justify-between gap-3 rounded-xl border border-white/[0.07] bg-[#0f1115] p-3.5 sm:flex-row sm:items-center">
-        <div className="flex items-center gap-2">
-          <span className="font-mono text-[9px] font-bold uppercase tracking-wider text-neutral-600">
+      <div className="mt-6 flex flex-col justify-between gap-3 rounded-2xl border border-white/5 bg-[#0b101d] p-4 sm:flex-row sm:items-center">
+        <div className="flex items-center gap-2.5">
+          <span className="font-mono text-[10px] font-bold uppercase tracking-wider text-slate-500">
             Engine Status:
           </span>
           <span
-            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-mono font-bold ${
+            className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-mono font-bold ${
               snapshot?.refresh_status === 'SUCCESS'
                 ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
                 : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
             }`}
           >
             {snapshot?.refresh_status === 'SUCCESS'
-              ? '● Live & Synced'
-              : '● Updating'}
+              ? ' Live & Synced'
+              : ' Updating'}
           </span>
         </div>
-        <p className="font-mono text-[10px] text-neutral-600">
+        <p className="font-mono text-[11px] text-slate-500">
           Last Synced:{' '}
           {snapshot?.computed_at
             ? new Date(snapshot.computed_at).toLocaleString('id-ID')

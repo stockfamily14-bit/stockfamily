@@ -1,37 +1,82 @@
-import { createClient } from '@/utils/supabase/server'
-import { getUserSubscription } from '@/utils/subscription'
-import ProGuard from '@/components/ProGuard'
+import { createClient } from '@/lib/supabase/server'
+import { addToWatchlist, removeFromWatchlist } from './actions'
 
 export default async function WatchlistPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  const subscription = user ? await getUserSubscription(user.id) : { isActive: false }
+  const { data: watchlistItems } = await supabase
+    .from('watchlists')
+    .select('ticker')
+    .eq('user_id', user!.id)
+
+  const tickers = (watchlistItems ?? []).map((w) => w.ticker)
+
+  const { data: stockDetails } = tickers.length
+    ? await supabase.from('stocks').select('*').in('ticker', tickers)
+    : { data: [] as any[] }
+
+  const { data: prices } = tickers.length
+    ? await supabase.from('latest_prices').select('*').in('ticker', tickers)
+    : { data: [] as any[] }
+
+    const cards = tickers.map((ticker) => {
+    const stock = stockDetails?.find((s) => s.ticker === ticker)
+    const price = prices?.find((p) => p.ticker === ticker)
+    return {
+      ticker,
+      name: stock?.name ?? ticker,
+      price: price?.price,
+      volume: price?.volume,
+    }
+  })
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6 py-4">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-black text-white">Pro Watchlist</h1>
-          <p className="text-sm text-slate-400">
-            Daftar pantauan emiten pilihan dengan peringatan harga dan sinyal teknikal otomatis.
-          </p>
-        </div>
-      </div>
+    <div className="p-6">
+      <h1 className="text-2xl font-semibold text-neutral-900">Watchlist</h1>
 
-      <ProGuard isPro={subscription.isActive} featureName="Watchlist Tanpa Batas & Price Alert">
-        <div className="bg-slate-900 border border-white/10 rounded-2xl p-6 space-y-6">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-bold text-white">Daftar Pantauan Aktif</h3>
-            <span className="text-xs bg-[#00D084]/10 text-[#00D084] border border-[#00D084]/30 px-3 py-1 rounded-full font-bold">
-              PRO ACTIVE
-            </span>
+      <form action={addToWatchlist} className="mt-4 flex gap-2">
+        <input
+          name="ticker"
+          placeholder="Kode saham, misal BBCA"
+          className="rounded-lg border border-neutral-300 px-3 py-2 text-sm uppercase focus:border-neutral-900 focus:outline-none"
+          required
+        />
+        <button
+          type="submit"
+          className="rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white hover:bg-neutral-800"
+        >
+          Tambah
+        </button>
+      </form>
+
+      <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {cards.length === 0 && (
+          <p className="text-sm text-neutral-500">Belum ada saham di watchlist kamu.</p>
+        )}
+        {cards.map((stock) => (
+          <div key={stock.ticker} className="rounded-xl border border-neutral-200 p-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="font-semibold text-neutral-900">{stock.ticker}</p>
+                <p className="text-xs text-neutral-500">{stock.name}</p>
+              </div>
+              <form action={removeFromWatchlist}>
+                <input type="hidden" name="ticker" value={stock.ticker} />
+                <button type="submit" className="text-xs text-neutral-400 hover:text-red-600">
+                  Hapus
+                </button>
+              </form>
+            </div>
+            <p className="mt-3 text-xl font-semibold text-neutral-900">
+              {stock.price != null ? `Rp${Number(stock.price).toLocaleString('id-ID')}` : '-'}
+            </p>
+            <p className="text-xs text-neutral-500">
+              Volume: {stock.volume != null ? Number(stock.volume).toLocaleString('id-ID') : '-'}
+            </p>
           </div>
-          <div className="text-sm text-slate-300">
-            Simpan hingga tak terbatas emiten favorit Anda dan pantau pergerakan harganya secara langsung di sini.
-          </div>
-        </div>
-      </ProGuard>
+        ))}
+      </div>
     </div>
   )
 }

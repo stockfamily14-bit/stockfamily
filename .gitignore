@@ -39,3 +39,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# backup files (jangan pernah commit ini)
+*.backup-before-*
+*.backup
+*- Copy.*
+desktop.ini
+temp_*.txt

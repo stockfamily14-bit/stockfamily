@@ -5,7 +5,6 @@ import YahooFinance from 'yahoo-finance2'
 import { getSupabaseAdmin } from '../src/lib/supabase/admin'
 import { analyzeStock, type Candle } from '../src/lib/analysis/technical'
 import { monitorInsights } from '../src/lib/insight/monitor'
-import { sendPendingTelegramNotifications } from '../src/lib/notifications/telegram'
 
 const yahooFinance = new YahooFinance()
 const supabaseAdmin = getSupabaseAdmin()
@@ -501,20 +500,7 @@ async function refreshInsights() {
   } catch (err) {
     console.error('Insight monitor gagal total:', err)
   }
-
-  console.log('Mengirim notifikasi Telegram...')
-  try {
-    const telegramResult = await sendPendingTelegramNotifications()
-    if (telegramResult.skippedNoSubscribers) {
-      console.log('Tidak ada subscriber Telegram aktif, lewati pengiriman.')
-    } else {
-      console.log(`Telegram selesai: ${telegramResult.sent} terkirim, ${telegramResult.failed} gagal.`)
-    }
-  } catch (err) {
-    console.error('Pengiriman Telegram gagal total:', err)
-  }
 }
-
 // ============================================================
 // REFRESH POLICY
 // ============================================================
@@ -589,3 +575,5 @@ run().catch((error) => {
   console.error('Fatal error:', error)
   process.exitCode = 1
 })
+
+
